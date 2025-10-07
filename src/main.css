@@ -184,3 +184,16 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Force React Flow handles to use their exact positioned locations and be clickable */
+.react-flow__handle {
+  transform: translate(-50%, -50%) !important;
+  z-index: 1000 !important;
+  pointer-events: all !important;
+}
+.react-flow__handle-left {
+  left: 0 !important;
+}
+.react-flow__handle-right {
+  right: 0 !important;
+}

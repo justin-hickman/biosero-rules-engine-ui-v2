@@ -42,6 +42,7 @@ import {
     Sun,
     Moon
 } from "@phosphor-icons/react";
+import N8nIntegrationPanel from './components/N8nIntegrationPanel';
 import { useKV } from '@github/spark/hooks';
 import { toast } from 'sonner';
 import SimpleRuleSelector from './SimpleRuleSelector';
@@ -1226,145 +1227,100 @@ const prepareRuleForApi = (uiRule: Rule): Rule => {
 // ==========================================================================
 
 // Enhanced Custom Node Components with template-matching colors and symbols
+// FINAL FIX: RuleNode with handles as siblings (handles first, content separate)
 const RuleNode = ({ data, selected }: { data: any; selected?: boolean }) => {
-    const { label, ruleId, expression, isInitiating, onClick, onEdit } = data;
-    const ref = React.useRef<HTMLDivElement>(null);
-    const [nodeHeight, setNodeHeight] = React.useState(0);
-    
-    React.useLayoutEffect(() => {
-        if (!ref.current) return;
-        const el = ref.current;
-        const update = () => setNodeHeight(el.getBoundingClientRect().height);
-        update();
-        const ro = new ResizeObserver(update);
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
-    
-    const HANDLE_DIAMETER = 12;
-    const R = HANDLE_DIAMETER / 2;
-    // Use 25% and 70% positions to visually center handles for varying node heights
-    const topOne = Math.max(8, nodeHeight * 0.25 - R);
-    const topTwo = Math.max(8, nodeHeight * 0.7 - R);
+    const { label, ruleId, expression, isInitiating, onEdit, onDelete } = data;
     
     return (
-        <div ref={ref} style={{ position: 'relative' }}>
-            {/* Input handle (left side) - use neutral grey */}
+        <div style={{ position: 'relative', width: '180px', height: 'auto' }}>
+            {/* HANDLES FIRST - SIBLINGS TO CONTENT, NOT CHILDREN */}
             <Handle
-                id="in-green"
+                id="in-left"
                 type="target"
                 position={Position.Left}
-                isConnectable={true}
-                isValidConnection={(c) => c.source !== c.target}
                 style={{
-                    top: topOne,
-                    width: HANDLE_DIAMETER,
-                    height: HANDLE_DIAMETER,
-                    borderRadius: '50%',
+                    top: '50%',
+                    left: '-6px',
+                    width: '12px',
+                    height: '12px',
                     background: '#9ca3af',
                     border: '1px solid #6b7280',
-                    left: -R,
-                    zIndex: 20,
-                    transform: 'none'
+                    borderRadius: '50%'
                 }}
             />
             
-            <div 
-                onClick={onEdit}
-                className={`
-                    px-3 py-2 bg-gradient-to-br from-blue-600 to-blue-700 
-                    border rounded-md cursor-pointer shadow-md
-                    ${isInitiating ? 'border-yellow-400 ring-1 ring-yellow-400/50' : 'border-blue-500'}
-                    ${selected ? 'ring-2 ring-white ring-offset-1 ring-offset-gray-800' : ''}
-                    hover:from-blue-500 hover:to-blue-600 hover:shadow-lg
-                    transition-all duration-150 min-w-[140px] max-w-[180px]
-                    relative
-                `}
-            >
-                <div className="text-white">
-                    <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-sm">⚖️</span>
-                        <div className="font-medium text-xs leading-tight truncate flex-1">{label}</div>
-                    </div>
-                    <div className="text-xs text-blue-200 font-mono truncate">({ruleId})</div>
-                    {expression && (
-                        <div className="text-xs text-blue-100 mt-1 font-mono truncate" title={expression}>
-                            {expression.length > 25 ? expression.substring(0, 25) + '...' : expression}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Output handles (right side) - Success and Failure */}
             <Handle
                 id="success"
                 type="source"
                 position={Position.Right}
-                isConnectable={true}
-                isValidConnection={(c) => c.source !== c.target}
-                style={{ 
-                    top: topOne,
-                    width: HANDLE_DIAMETER,
-                    height: HANDLE_DIAMETER,
-                    borderRadius: '50%',
+                style={{
+                    top: '33.33%',
+                    right: '-6px',
+                    width: '12px',
+                    height: '12px',
                     background: '#4ade80',
                     border: '1px solid #16a34a',
-                    right: -R,
-                    zIndex: 20,
-                    transform: 'none'
+                    borderRadius: '50%'
                 }}
             />
+            
             <Handle
                 id="failure"
                 type="source"
                 position={Position.Right}
-                isConnectable={true}
-                isValidConnection={(c) => c.source !== c.target}
-                style={{ 
-                    top: topTwo,
-                    width: HANDLE_DIAMETER,
-                    height: HANDLE_DIAMETER,
-                    borderRadius: '50%',
+                style={{
+                    top: '66.66%',
+                    right: '-6px',
+                    width: '12px',
+                    height: '12px',
                     background: '#f87171',
                     border: '1px solid #dc2626',
-                    right: -R,
-                    zIndex: 20,
-                    transform: 'none'
+                    borderRadius: '50%'
                 }}
             />
-            {/* Delete button for rule nodes */}
-            <div style={{ position: 'absolute', right: 6, top: 6 }}>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        data?.onDelete?.();
-                    }}
-                    title="Delete node"
-                    className="text-xs bg-red-500/20 px-1 py-0.5 rounded hover:bg-red-500/40"
-                >
-                    ×
-                </button>
+            
+            {/* CONTENT DIV - NO HANDLES INSIDE HERE */}
+            <div 
+                onClick={onEdit}
+                className="px-3 py-2 bg-gradient-to-br from-blue-600 to-blue-700 border border-blue-500 rounded-md cursor-pointer shadow-md hover:shadow-lg min-w-[140px] max-w-[180px]"
+            >
+                <div className="text-white">
+                    <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-sm">⚖️</span>
+                        <div className="font-medium text-xs truncate flex-1">{label}</div>
+                    </div>
+                    <div className="text-xs text-blue-200 font-mono truncate">({ruleId})</div>
+                </div>
             </div>
+            
+            {/* DELETE BUTTON */}
+            <button
+                onClick={(e) => { e.stopPropagation(); onDelete?.(); }}
+                style={{ 
+                    position: 'absolute', 
+                    right: '2px', 
+                    top: '2px',
+                    fontSize: '9px',
+                    padding: '1px 3px',
+                    backgroundColor: 'rgba(127, 29, 29, 0.8)',
+                    color: '#fca5a5',
+                    border: 'none',
+                    borderRadius: '2px',
+                    cursor: 'pointer',
+                    lineHeight: '1'
+                }}
+            >×</button>
         </div>
     );
 };
 
+            
+
+// CORRECTED ActionNode Component
 const ActionNode = ({ data, selected }: { data: any; selected?: boolean }) => {
     const { label, actionType, isSuccess, onEdit, onDelete } = data;
-    const ref = React.useRef<HTMLDivElement>(null);
-    const [nodeHeight, setNodeHeight] = React.useState(0);
     
-    React.useLayoutEffect(() => {
-        if (!ref.current) return;
-        const el = ref.current;
-        const update = () => setNodeHeight(el.getBoundingClientRect().height);
-        update();
-        const ro = new ResizeObserver(update);
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
-    
-    // Determine colors and symbols based on action type to match rule templates
+    // Determine colors based on action type
     let bgGradient, borderColor, textColor, icon;
     
     if (actionType?.includes('RuleEvaluation')) {
@@ -1383,40 +1339,34 @@ const ActionNode = ({ data, selected }: { data: any; selected?: boolean }) => {
         textColor = 'text-emerald-100';
         icon = '📅';
     } else {
-        // Fallback colors for other actions
         bgGradient = isSuccess ? 'from-green-600 to-green-700' : 'from-red-600 to-red-700';
         borderColor = isSuccess ? 'border-green-500' : 'border-red-500';
         textColor = isSuccess ? 'text-green-100' : 'text-red-100';
         icon = isSuccess ? '✅' : '❌';
     }
     
-    const HANDLE_DIAMETER = 12;
-    const R = HANDLE_DIAMETER / 2;
-    const topOne = Math.max(8, nodeHeight * 0.25 - R);
-    const topTwo = Math.max(8, nodeHeight * 0.7 - R);
-    
     return (
-        <div ref={ref} style={{ position: 'relative' }}>
-            {/* Input handle (left side) - neutral grey */}
+        <div style={{ position: 'relative' }}>
+            {/* LEFT INPUT HANDLE ONLY - at 50% height */}
             <Handle
-                id="in-green"
+                id="in-left"
                 type="target"
                 position={Position.Left}
                 isConnectable={true}
-                isValidConnection={(c) => c.source !== c.target}
                 style={{
-                    top: topOne,
-                    width: HANDLE_DIAMETER,
-                    height: HANDLE_DIAMETER,
+                    top: '50%',
+                    left: '-6px',
+                    width: '12px',
+                    height: '12px',
                     borderRadius: '50%',
                     background: '#9ca3af',
                     border: '1px solid #6b7280',
-                    left: -R,
-                    zIndex: 20,
-                    transform: 'none'
+                    transform: 'translateY(-50%)',
+                    zIndex: 20
                 }}
             />
             
+            {/* NODE CONTENT */}
             <div 
                 onClick={onEdit}
                 className={`
@@ -1431,137 +1381,43 @@ const ActionNode = ({ data, selected }: { data: any; selected?: boolean }) => {
                     <div className="flex items-center gap-1.5 mb-1">
                         <span className="text-sm">{icon}</span>
                         <div className="font-medium text-xs leading-tight truncate flex-1">{label}</div>
-                        <div className="opacity-100 flex gap-1">
-                            <button 
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDelete?.();
-                                }}
-                                className="text-xs bg-red-500/30 px-1 py-0.5 rounded hover:bg-red-500/50"
-                            >
-                                ×
-                            </button>
-                        </div>
                     </div>
                     <div className={`text-xs ${textColor} truncate`}>
                         {actionType?.replace('Action', '') || 'Action'}
                     </div>
                 </div>
             </div>
-
-            {/* Output handle (right side) */}
-            <Handle
-                id="out-red"
-                type="source"
-                position={Position.Right}
-                isConnectable={true}
-                isValidConnection={(c) => c.source !== c.target}
-                style={{
-                    top: topTwo,
-                    width: HANDLE_DIAMETER,
-                    height: HANDLE_DIAMETER,
-                    borderRadius: '50%',
-                    background: '#ef4444',
-                    border: '1px solid #dc2626',
-                    right: -R,
-                    zIndex: 20,
-                    transform: 'none'
-                }}
-            />
-        </div>
-    );
-};
-
-const ErrorNode = ({ data, selected }: { data: any; selected?: boolean }) => {
-    const { label, message, onDelete } = data;
-    const ref = React.useRef<HTMLDivElement>(null);
-    const [nodeHeight, setNodeHeight] = React.useState(0);
-    
-    React.useLayoutEffect(() => {
-        if (!ref.current) return;
-        const el = ref.current;
-        const update = () => setNodeHeight(el.getBoundingClientRect().height);
-        update();
-        const ro = new ResizeObserver(update);
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
-    
-    const HANDLE_DIAMETER = 12;
-    const R = HANDLE_DIAMETER / 2;
-    const topOneThird = Math.max(0, nodeHeight / 3 - R);
-    
-    return (
-        <div ref={ref} style={{ position: 'relative' }}>
-            <Handle
-                id="in-green"
-                type="target"
-                position={Position.Left}
-                isConnectable={true}
-                isValidConnection={(c) => c.source !== c.target}
-                style={{
-                    top: topOneThird,
-                    width: HANDLE_DIAMETER,
-                    height: HANDLE_DIAMETER,
-                    borderRadius: '50%',
-                    background: '#22c55e',
-                    border: '1px solid #16a34a',
-                    left: -R,
-                    zIndex: 20,
-                    transform: 'none'
-                }}
-            />
             
-            <div 
-                className={`
-                    px-3 py-2 bg-gradient-to-br from-red-800 to-red-900 border-2 
-                    border-red-600 rounded-lg shadow-lg min-w-[140px] max-w-[200px]
-                    ${selected ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-gray-900' : ''}
-                    relative
-                `}
-            >
-                <div className="text-white">
-                    <div className="flex items-center gap-2 mb-1">
-                        <span>⚠️</span>
-                        <div className="font-medium text-sm leading-tight flex-1">Error</div>
-                        <div className="opacity-100">
-                            <button 
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDelete?.();
-                                }}
-                                className="text-xs bg-red-500/30 px-1 py-0.5 rounded hover:bg-red-500/50"
-                            >
-                                ×
-                            </button>
-                        </div>
-                    </div>
-                    <div className="text-xs text-red-200 truncate">{label}</div>
-                    {message && (
-                        <div className="text-xs text-red-300 mt-1 truncate" title={message}>
-                            {message}
-                        </div>
-                    )}
-                </div>
+            {/* Delete button */}
+            <div style={{ position: 'absolute', right: 3, top: 3 }}>
+                <button 
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete?.();
+                    }}
+                    title="Delete node"
+                    className="text-[10px] bg-red-500/10 px-0.5 py-0 rounded hover:bg-red-500/30 opacity-40 hover:opacity-100 transition-opacity"
+                    style={{ lineHeight: '1' }}
+                >
+                    ×
+                </button>
             </div>
         </div>
     );
 };
 
-// Remove the Create Rule Node component entirely
-// (component removed)
-
-// Add a Draggable Rule Template component
+// Add a Draggable Rule Template component (restores missing function header)
 const DraggableRuleTemplate = ({ type, label, icon, onDragStart }: { 
     type: string; 
     label: string; 
     icon: string; 
     onDragStart: (event: React.DragEvent, nodeType: string) => void; 
 }) => {
-    // Determine colors based on template type to match node colors
-    let bgGradient, borderColor;
-    
-                if (type === 'rule') {
+    // determine colors based on template type
+    let bgGradient: string = '';
+    let borderColor: string = '';
+
+    if (type === 'rule') {
         bgGradient = 'from-blue-600 to-blue-700';
         borderColor = 'border-blue-500';
     } else if (type === 'action-workflow') {
@@ -1589,6 +1445,51 @@ const DraggableRuleTemplate = ({ type, label, icon, onDragStart }: {
             <div className="flex items-center justify-center gap-1.5">
                 <span className="text-sm">{icon}</span>
                 <span className="text-xs font-medium">{label}</span>
+            </div>
+        </div>
+    );
+};
+
+// ErrorNode component (restored)
+const ErrorNode = ({ data, selected }: { data: any; selected?: boolean }) => {
+    const { label, message, onDelete } = data || {};
+    return (
+        <div style={{ position: 'relative' }}>
+            <Handle
+                id="in-green"
+                type="target"
+                position={Position.Left}
+                isConnectable={true}
+                style={{
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    background: '#22c55e',
+                    border: '1px solid #16a34a',
+                    left: -6,
+                    zIndex: 20
+                }}
+            />
+
+            <div className={`px-3 py-2 bg-gradient-to-br from-red-800 to-red-900 border-2 border-red-600 rounded-lg shadow-lg min-w-[140px] max-w-[200px] ${selected ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-gray-900' : ''}`}>
+                <div className="text-white flex items-center gap-2">
+                    <span>⚠️</span>
+                    <div className="font-medium text-sm leading-tight flex-1">{label || 'Error'}</div>
+                </div>
+                {message && <div className="text-xs text-red-300 mt-1 truncate" title={message}>{message}</div>}
+            </div>
+
+            <div style={{ position: 'absolute', right: -6, top: -6, zIndex: 40 }}>
+                <button
+                    onClick={(e) => { e.stopPropagation(); onDelete?.(); }}
+                    title="Delete node"
+                    className="w-6 h-6 flex items-center justify-center text-[12px] text-white bg-red-700 hover:bg-red-800 rounded-full shadow-md"
+                    style={{ lineHeight: '1' }}
+                >
+                    ×
+                </button>
             </div>
         </div>
     );
@@ -2162,7 +2063,7 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>
                         Edit {editingNodeType === 'rule' ? 'Rule' : 'Action'} Node
@@ -2489,6 +2390,22 @@ function ChainFlowDiagramInner({
         }
     }, [setNodes, setEdges, onChainUpdate, chainData]);
 
+    // Create stable callback references so the effect that converts chainData -> nodes
+    // doesn't re-run due to changing handler references. We keep a ref to the
+    // incoming onNodeClick prop and expose a stable function.
+    const onNodeClickRef = React.useRef(onNodeClick);
+    React.useEffect(() => { onNodeClickRef.current = onNodeClick; }, [onNodeClick]);
+
+    const stableOnNodeClick = React.useCallback((ruleId: string) => {
+        onNodeClickRef.current?.(ruleId);
+    }, []);
+
+    // The internal handlers are already memoized; expose stable aliases for clarity
+    const stableHandleNodeEdit = handleNodeEdit;
+    const stableHandleNodeDelete = React.useCallback((nodeId: string) => {
+        handleNodeDelete(nodeId);
+    }, [handleNodeDelete]);
+
     // Handle drag start - store the dragged node type
     const handleDragStart = React.useCallback((event: React.DragEvent, nodeType: string) => {
         event.dataTransfer.setData('application/reactflow', nodeType);
@@ -2639,8 +2556,20 @@ function ChainFlowDiagramInner({
 
     // Handle connection creation with canonical approach
     const onConnect = React.useCallback((connection: Connection) => {
-        console.log('onConnect', connection);
+        // Detailed debug logging for connections and handle ids
+        console.log('CONNECTION OBJECT:', {
+            source: connection.source,
+            sourceHandle: connection.sourceHandle,
+            target: connection.target,
+            targetHandle: connection.targetHandle,
+            raw: connection
+        });
+
         if (!isEditable || !connection.source || !connection.target) return;
+
+        if (!connection.sourceHandle || !connection.targetHandle) {
+            console.error('MISSING HANDLE IDS in connection. sourceHandle or targetHandle is null/undefined');
+        }
 
         // Determine connection type based on source handle
         let connectionType: 'success' | 'failure' | 'connection' = 'connection';
@@ -2656,8 +2585,11 @@ function ChainFlowDiagramInner({
         
         // Use addEdge to properly create the edge
         const newEdge: Edge = {
-            ...connection,
             id: `edge-${Date.now()}`,
+            source: connection.source,
+            target: connection.target,
+            sourceHandle: connection.sourceHandle,
+            targetHandle: connection.targetHandle,
             type: 'custom',
             animated: false,
             style: {
@@ -2720,18 +2652,28 @@ function ChainFlowDiagramInner({
         if (chainData && Object.keys(chainData.nodes).length > 0) {
             const { nodes: newNodes, edges: newEdges } = convertToReactFlowFormat(
                 chainData, 
-                onNodeClick, 
-                handleNodeEdit, 
-                handleNodeDelete
+                stableOnNodeClick, 
+                stableHandleNodeEdit, 
+                stableHandleNodeDelete
             );
-            setNodes(newNodes);
+
+            // Preserve manually adjusted positions
+            setNodes((currentNodes) => {
+                const positionMap = new Map(currentNodes.map(n => [n.id, n.position]));
+                return newNodes.map(node => ({
+                    ...node,
+                    position: positionMap.get(node.id) || node.position
+                }));
+            });
+
             setEdges(newEdges);
         } else {
             // Always start with blank canvas
             setNodes([]);
             setEdges([]);
         }
-    }, [chainData, onNodeClick, handleNodeEdit, handleNodeDelete]);
+        // Intentionally depend only on chainData to avoid re-running on UI interactions
+    }, [chainData]);
 
     if (isLoading) {
         return (
@@ -2799,7 +2741,7 @@ function ChainFlowDiagramInner({
                 proOptions={{ hideAttribution: true }}
                 defaultEdgeOptions={{
                     type: 'smoothstep',
-                    animated: true,
+                    animated: false,
                     style: { strokeWidth: 2 }
                 }}
             >
@@ -2894,6 +2836,97 @@ const ChainFlowDiagram = React.memo(function ChainFlowDiagram(props: ChainFlowDi
         </ReactFlowProvider>
     );
 });
+
+// --------------------------------------------------------------------------
+// n8n Workflow Editor (iframe embed) - Option 1 quick integration
+// --------------------------------------------------------------------------
+const N8nWorkflowEditor: React.FC<{
+    workflowData?: any;
+    isLoading: boolean;
+}> = ({ workflowData, isLoading }) => {
+    const [n8nUrl] = React.useState('http://localhost:5678');
+    const [isN8nReady, setIsN8nReady] = React.useState(false);
+
+    React.useEffect(() => {
+        let mounted = true;
+
+        const tryImagePing = (url: string) => new Promise<boolean>((resolve) => {
+            try {
+                const img = new Image();
+                img.onload = () => resolve(true);
+                img.onerror = () => resolve(false);
+                // Append a cache buster
+                img.src = `${url.replace(/\/$/, '')}/favicon.ico?cb=${Date.now()}`;
+                // Fallback timeout
+                setTimeout(() => resolve(false), 3000);
+            } catch {
+                resolve(false);
+            }
+        });
+
+        const checkN8n = async () => {
+            try {
+                const response = await fetch(`${n8nUrl}/healthz`, { mode: 'cors' });
+                if (!mounted) return;
+                if (response.ok) {
+                    setIsN8nReady(true);
+                    return;
+                }
+            } catch (e) {
+                // CORS or network error - fallback to image ping
+            }
+
+            // Try an image ping to detect a running n8n instance even if CORS blocks /healthz
+            try {
+                const ok = await tryImagePing(n8nUrl);
+                if (!mounted) return;
+                setIsN8nReady(ok);
+            } catch {
+                if (!mounted) return;
+                setIsN8nReady(false);
+            }
+        };
+
+        checkN8n();
+        const iv = setInterval(checkN8n, 5000);
+        return () => { mounted = false; clearInterval(iv); };
+    }, [n8nUrl]);
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <SpinnerGap size={32} className="animate-spin" />
+                <div>Loading workflow...</div>
+            </div>
+        );
+    }
+
+    if (!isN8nReady) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full gap-4 p-8">
+                <h3 className="text-xl font-semibold">n8n Not Running</h3>
+                <p className="text-muted-foreground text-center max-w-md">
+                    Start n8n to use the workflow editor:
+                </p>
+                <code className="bg-muted px-4 py-2 rounded font-mono text-sm">
+                    n8n start
+                </code>
+                <p className="text-xs text-muted-foreground">Then refresh this page</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="w-full h-full relative">
+            <iframe
+                src={`${n8nUrl}/workflow/new`}
+                className="w-full h-full border-0"
+                title="n8n Workflow Editor"
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+            />
+        </div>
+    );
+};
 
 // ==========================================================================
 // React Components
@@ -3206,7 +3239,7 @@ const ChainMapDialog: React.FC<ChainMapDialogProps> = ({
     
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
                 <DialogHeader>
                     <DialogTitle>Generate Rule Chain Map</DialogTitle>
                     <DialogDescription>
@@ -3361,7 +3394,7 @@ const ImportRuleDialog: React.FC<ImportRuleDialogProps> = ({
     
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
                 <DialogHeader>
                     <DialogTitle>Import Rule from Data Services</DialogTitle>
                     <DialogDescription>
@@ -3423,7 +3456,7 @@ const ResponseDialog: React.FC<ResponseDialogProps> = ({
     
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-3xl">
                 <DialogHeader className="pb-2">
                     <DialogTitle className="flex items-center gap-2">
                         {details.success ? (
@@ -4944,15 +4977,17 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                         <p className="text-destructive-foreground text-center">{chainError}</p>
                                     </div>
                                 )}
-                                <ChainFlowDiagram
-                                    key={`chain-${ruleChainData?.nodes ? Object.keys(ruleChainData.nodes).length : 0}`}
-                                    chainData={ruleChainData}
-                                    onNodeClick={handleRuleNodeClick}
-                                    onChainUpdate={handleChainUpdate}
-                                    isLoading={isLoading.chainData}
-                                    isEditable={true}
-                                    dataServicesRootURI={dataServicesRootURI || ""}
-                                />
+                                <div className="h-full flex flex-col">
+                                    <div className="flex-1">
+                                        <N8nWorkflowEditor
+                                            workflowData={ruleChainData}
+                                            isLoading={isLoading.chainData}
+                                        />
+                                    </div>
+                                    <div className="p-4">
+                                        <N8nIntegrationPanel chain={ruleChainData} onWorkflowCreated={(id) => console.log('n8n workflow id', id)} />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
