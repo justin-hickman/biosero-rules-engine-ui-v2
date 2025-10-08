@@ -1,10 +1,21 @@
-import { useKV } from '@github/spark/hooks';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 type Theme = 'dark' | 'light';
 
 export function useTheme() {
-  const [theme, setTheme] = useKV<Theme>('theme', 'dark');
+  const [theme, setThemeState] = useState<Theme>(() => {
+    try {
+      const saved = localStorage.getItem('theme');
+      return (saved as Theme) || 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  const setTheme = (newTheme: Theme) => {
+    setThemeState(newTheme);
+    localStorage.setItem('theme', newTheme);
+  };
 
   useEffect(() => {
     const root = window.document.documentElement;

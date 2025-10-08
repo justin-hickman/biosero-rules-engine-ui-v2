@@ -42,11 +42,35 @@ import {
     Sun,
     Moon
 } from "@phosphor-icons/react";
-import { useKV } from '@github/spark/hooks';
 import { toast } from 'sonner';
+
+// Simple localStorage hook to replace Spark's useKV
+function useLocalStorage<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+    const [storedValue, setStoredValue] = React.useState<T>(() => {
+        try {
+            const item = window.localStorage.getItem(key);
+            return item ? JSON.parse(item) : initialValue;
+        } catch (error) {
+            return initialValue;
+        }
+    });
+
+    const setValue: React.Dispatch<React.SetStateAction<T>> = (value) => {
+        try {
+            const valueToStore = value instanceof Function ? value(storedValue) : value;
+            setStoredValue(valueToStore);
+            window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        } catch (error) {
+            console.error('Error saving to localStorage:', error);
+        }
+    };
+
+    return [storedValue, setValue];
+}
 import SimpleRuleSelector from './SimpleRuleSelector';
 import { isSupportedAction, getSchema, isTemplateDrivenAction } from './action-schemas';
 import { useTheme } from './hooks/use-theme';
+import { ChainFlowReactFlow } from './ChainFlowReactFlow';
 
 import {
     ReactFlow,
@@ -78,8 +102,20 @@ import {
     XYPosition,
     getConnectedEdges,
     getIncomers,
-    getOutgoers
+    getOutgoers,
+    getBezierPath,
+    BaseEdge
 } from '@xyflow/react';
+
+import {
+    Canvas,
+    Node as ReaflowNode,
+    Edge as ReaflowEdge,
+    Port,
+    MarkerArrow,
+    NodeProps as ReaflowNodeProps,
+    EdgeProps as ReaflowEdgeProps
+} from 'reaflow';
 
 
 // ==========================================================================
@@ -600,6 +636,19 @@ export const apiFetchRuleDetails = async (dataServicesRootURI: string, ruleId: s
             }
         }
         
+        // Check for 404 - this means it's a new rule
+        if (response.status === 404) {
+            console.log(`Rule ${ruleId} not found - creating new rule template`);
+            // Return a default rule template for new rules
+            return {
+                ...DEFAULT_RULE_TEMPLATE,
+                id: ruleId,
+                name: ruleId,
+                description: `New rule ${ruleId}`,
+                typeIdentifier: "Business Rule"
+            };
+        }
+        
         const result = await handleApiResponse(response, `Fetch rule details for ${ruleId}`);
         return result.data;
     } catch (error: any) {
@@ -919,7 +968,8 @@ const apiValidateExpression = async (rulesEngineRootURI: string, payload: any): 
     }
 };
 
-const apiFetchOrderTemplates = async (dataServicesRootURI: string): Promise<any[]> => {
+// Export for ChainFlowReactFlow
+export const apiFetchOrderTemplates = async (dataServicesRootURI: string): Promise<any[]> => {
     if (!dataServicesRootURI) throw new Error("Data Services Root URI required.");
     
     const endpoint = `${dataServicesRootURI}${API_ORDER_TEMPLATES}`;
@@ -974,7 +1024,7 @@ Troubleshooting:
     }
 };
 
-const apiFetchOrderTemplateDetails = async (dataServicesRootURI: string, templateName: string): Promise<any> => {
+export const apiFetchOrderTemplateDetails = async (dataServicesRootURI: string, templateName: string): Promise<any> => {
     if (!dataServicesRootURI || !templateName) throw new Error("Data Services Root URI and Template Name required.");
     
     const encodedTemplateName = encodeURIComponent(templateName);
@@ -1222,202 +1272,148 @@ const prepareRuleForApi = (uiRule: Rule): Rule => {
 };
 
 // ==========================================================================
-// React Flow Chain Map Functionality
+// Reaflow Chain Map Functionality
 // ==========================================================================
 
-// Enhanced Custom Node Components with template-matching colors and symbols
-// FINAL FIX: RuleNode with handles as siblings (handles first, content separate)
-const RuleNode = ({ data, selected }: { data: any; selected?: boolean }) => {
-    const { label, ruleId, expression, isInitiating, onEdit, onDelete } = data;
+// Custom Rule Node for Reaflow
+const CustomRuleNode = (props: ReaflowNodeProps) => {
+    const { properties } = props;
+    const { label, ruleId, onEdit, onDelete } = properties as any;
     
     return (
-        <div style={{ position: 'relative', width: '180px', height: 'auto' }}>
-            {/* HANDLES FIRST - SIBLINGS TO CONTENT, NOT CHILDREN */}
-            <Handle
-                id="in-left"
-                type="target"
-                position={Position.Left}
-                style={{
-                    top: '50%',
-                    left: '-6px',
-                    width: '12px',
-                    height: '12px',
-                    background: '#9ca3af',
-                    border: '1px solid #6b7280',
-                    borderRadius: '50%'
-                }}
-            />
-            
-            <Handle
-                id="success"
-                type="source"
-                position={Position.Right}
-                style={{
-                    top: '33.33%',
-                    right: '-6px',
-                    width: '12px',
-                    height: '12px',
-                    background: '#4ade80',
-                    border: '1px solid #16a34a',
-                    borderRadius: '50%'
-                }}
-            />
-            
-            <Handle
-                id="failure"
-                type="source"
-                position={Position.Right}
-                style={{
-                    top: '66.66%',
-                    right: '-6px',
-                    width: '12px',
-                    height: '12px',
-                    background: '#f87171',
-                    border: '1px solid #dc2626',
-                    borderRadius: '50%'
-                }}
-            />
-            
-            {/* CONTENT DIV - NO HANDLES INSIDE HERE */}
+        <foreignObject width={200} height={80} x={0} y={0}>
             <div 
-                onClick={onEdit}
-                className="px-3 py-2 bg-gradient-to-br from-blue-600 to-blue-700 border border-blue-500 rounded-md cursor-pointer shadow-md hover:shadow-lg min-w-[140px] max-w-[180px]"
+                className={`
+                    px-4 py-3 bg-white dark:bg-slate-800 
+                    border-2 border-blue-500 rounded-lg
+                    shadow-sm hover:shadow-md transition-all duration-200
+                    w-full h-full
+                `}
+                style={{ position: 'relative' }}
             >
-                <div className="text-white">
-                    <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-sm">⚖️</span>
-                        <div className="font-medium text-xs truncate flex-1">{label}</div>
+                {/* Content - clickable area */}
+                <div onClick={onEdit} className="cursor-pointer flex-1">
+                    <div className="flex items-center gap-2 mb-1.5">
+                        <div className="text-lg">⚖️</div>
+                        <div className="font-semibold text-sm text-slate-900 dark:text-white truncate flex-1">
+                            {label}
+                        </div>
                     </div>
-                    <div className="text-xs text-blue-200 font-mono truncate">({ruleId})</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">
+                        {ruleId}
+                    </div>
                 </div>
-            </div>
-            
-            {/* Delete button for nodes */}
-            <div style={{ position: 'absolute', right: '4px', top: '4px', zIndex: 50 }}>
+                
+                {/* Edit button */}
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        // Use appropriate deletion logic for each node type
-                        data?.onDelete?.() || onDelete?.(); 
+                        onEdit?.();
+                    }}
+                    title="Edit rule"
+                    className="absolute top-1 right-5 w-7 h-7 rounded bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center transition-colors shadow-sm text-xs"
+                >
+                    ✏️
+                </button>
+                
+                {/* Delete button */}
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete?.(); 
                     }}
                     title="Delete node"
-                    className="
-                        size-3 p-0 rounded-full text-gray-400 text-xs font-bold
-                        flex items-center justify-center bg-transparent
-                        hover:bg-red-500/30 hover:text-red-300
-                        transition-all duration-150 focus:outline-none border border-transparent hover:border-red-500/50
-                    "
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-sm leading-none text-xs font-bold"
                 >
                     ×
                 </button>
             </div>
-        </div>
+        </foreignObject>
     );
 };
 
             
 
-// CORRECTED ActionNode Component
-const ActionNode = ({ data, selected }: { data: any; selected?: boolean }) => {
-    const { label, actionType, isSuccess, onEdit, onDelete } = data;
+// Custom Action Node for Reaflow
+const CustomActionNode = (props: ReaflowNodeProps) => {
+    const { properties } = props;
+    const { label, actionType, onEdit, onDelete } = properties as any;
     
-    // Determine colors based on action type
-    let bgGradient, borderColor, textColor, icon;
+    // Determine colors and icon based on action type
+    let borderColor, icon, bgClass;
     
-    if (actionType?.includes('RuleEvaluation')) {
-        // Rule evaluation / Rule node approximation - keep teal for rule evaluation
-        bgGradient = 'from-teal-600 to-teal-700';
-        borderColor = 'border-teal-500';
-        textColor = 'text-teal-100';
-        icon = '⚖️';
-    } else if (actionType?.includes('IMIC2')) {
-        // IMIC2 approximates the Rule Node's new cleaner blue
-        bgGradient = 'from-blue-700 to-blue-800';
-        borderColor = 'border-blue-500';
-        textColor = 'text-blue-100';
-        icon = '🔵';
-    } else if (actionType?.includes('OrchestratorWorkflow')) {
-        // Use deeper violet/fuchsia for workflows
-        bgGradient = 'from-fuchsia-700 to-fuchsia-800';
-        borderColor = 'border-fuchsia-500';
-        textColor = 'text-fuchsia-100';
+    if (actionType?.includes('OrchestratorWorkflow') || actionType?.includes('Workflow')) {
+        borderColor = '#a855f7';
+        bgClass = 'bg-purple-50 dark:bg-purple-950/20';
         icon = '🔧';
     } else if (actionType?.includes('GbgScheduler') || actionType?.includes('Scheduler')) {
-        // Scheduler - teal/green accent
-        bgGradient = 'from-teal-600 to-teal-700';
-        borderColor = 'border-teal-400';
-        textColor = 'text-teal-100';
+        borderColor = '#14b8a6';
+        bgClass = 'bg-teal-50 dark:bg-teal-950/20';
         icon = '📅';
+    } else if (actionType?.includes('IMIC2')) {
+        borderColor = '#3b82f6';
+        bgClass = 'bg-blue-50 dark:bg-blue-950/20';
+        icon = '🔵';
     } else {
-        bgGradient = isSuccess ? 'from-green-600 to-green-700' : 'from-red-600 to-red-700';
-        borderColor = isSuccess ? 'border-green-500' : 'border-red-500';
-        textColor = isSuccess ? 'text-green-100' : 'text-red-100';
-        icon = isSuccess ? '✅' : '❌';
+        borderColor = '#10b981';
+        bgClass = 'bg-emerald-50 dark:bg-emerald-950/20';
+        icon = '✓';
     }
     
     return (
-        <div style={{ position: 'relative' }}>
-            {/* LEFT INPUT HANDLE ONLY - at 50% height */}
-            <Handle
-                id="in-left"
-                type="target"
-                position={Position.Left}
-                isConnectable={true}
-                style={{
-                    top: '50%',
-                    left: '-6px',
-                    width: '12px',
-                    height: '12px',
-                    borderRadius: '50%',
-                    background: '#9ca3af',
-                    border: '1px solid #6b7280',
-                    transform: 'translateY(-50%)',
-                    zIndex: 20
-                }}
-            />
-            
-            {/* NODE CONTENT */}
+        <foreignObject width={180} height={80} x={0} y={0}>
             <div 
-                onClick={onEdit}
                 className={`
-                    px-3 py-2 bg-gradient-to-br ${bgGradient} border ${borderColor} 
-                    rounded-md shadow-md min-w-[120px] max-w-[160px]
-                    ${selected ? 'ring-2 ring-white ring-offset-1 ring-offset-gray-800' : ''}
-                    hover:shadow-lg transition-all duration-150 cursor-pointer
-                    relative
+                    px-4 py-3 ${bgClass}
+                    rounded-lg
+                    shadow-sm hover:shadow-md transition-all duration-200
+                    w-full h-full
                 `}
+                style={{ 
+                    position: 'relative',
+                    borderWidth: '2px',
+                    borderStyle: 'solid',
+                    borderColor: borderColor
+                }}
             >
-                <div className="text-white">
-                    <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-sm">{icon}</span>
-                        <div className="font-medium text-xs leading-tight truncate flex-1">{label}</div>
+                {/* Content */}
+                <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                        <div className="text-lg">{icon}</div>
+                        <div className="font-semibold text-sm text-slate-900 dark:text-white truncate flex-1">
+                            {label}
+                        </div>
                     </div>
-                    <div className={`text-xs ${textColor} truncate`}>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
                         {actionType?.replace('Action', '') || 'Action'}
                     </div>
                 </div>
-            </div>
-            
-            {/* Delete button for nodes */}
-            <div style={{ position: 'absolute', right: '4px', top: '4px', zIndex: 50 }}>
+                
+                {/* Edit button */}
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        // Use appropriate deletion logic for each node type
-                        data?.onDelete?.() || onDelete?.(); 
+                        onEdit?.();
+                    }}
+                    title="Edit action"
+                    className="absolute top-1 right-5 w-7 h-7 rounded bg-purple-500 hover:bg-purple-600 text-white flex items-center justify-center transition-colors shadow-sm text-xs"
+                >
+                    ✏️
+                </button>
+                
+                {/* Delete button - rounded square */}
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete?.(); 
                     }}
                     title="Delete node"
-                    className="
-                        size-3 p-0 rounded-full text-gray-400 text-xs font-bold
-                        flex items-center justify-center bg-transparent
-                        hover:bg-red-500/30 hover:text-red-300
-                        transition-all duration-150 focus:outline-none border border-transparent hover:border-red-500/50
-                    "
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-sm leading-none text-xs font-bold"
                 >
                     ×
                 </button>
             </div>
-        </div>
+        </foreignObject>
     );
 };
 
@@ -1428,90 +1424,85 @@ const DraggableRuleTemplate = ({ type, label, icon, onDragStart }: {
     icon: string; 
     onDragStart: (event: React.DragEvent, nodeType: string) => void; 
 }) => {
-    // determine colors based on template type
-    let bgGradient: string = '';
-    let borderColor: string = '';
+    let borderColorHex: string = '';
+    let bgClass: string = '';
 
     if (type === 'rule') {
-        bgGradient = 'from-blue-600 to-blue-700';
-        borderColor = 'border-blue-500';
+        bgClass = 'bg-blue-50 dark:bg-blue-950/20';
+        borderColorHex = '#3b82f6';
     } else if (type === 'action-workflow') {
-        bgGradient = 'from-purple-600 to-purple-700';
-        borderColor = 'border-purple-500';
+        bgClass = 'bg-purple-50 dark:bg-purple-950/20';
+        borderColorHex = '#a855f7';
     } else if (type === 'action-scheduler') {
-        bgGradient = 'from-emerald-600 to-emerald-700';
-        borderColor = 'border-emerald-500';
+        bgClass = 'bg-teal-50 dark:bg-teal-950/20';
+        borderColorHex = '#14b8a6';
     } else {
-        // Fallback
-        bgGradient = 'from-gray-600 to-gray-700';
-        borderColor = 'border-gray-500';
+        bgClass = 'bg-slate-50 dark:bg-slate-800';
+        borderColorHex = '#64748b';
     }
 
     return (
         <div
-            className={`px-3 py-2 bg-gradient-to-br ${bgGradient} border ${borderColor}
-                       rounded-md shadow-md cursor-grab hover:shadow-lg
-                       transition-all duration-150 min-w-[120px] text-white text-center
+            className={`px-3 py-2 ${bgClass}
+                       rounded-md shadow-sm cursor-grab hover:shadow-md
+                       transition-all duration-200 min-w-[120px] text-center
                        active:cursor-grabbing select-none`}
+            style={{ borderWidth: '2px', borderStyle: 'solid', borderColor: borderColorHex }}
             draggable
             onDragStart={(event) => onDragStart(event, type)}
             title={`Drag to create a new ${label}`}
         >
-            <div className="flex items-center justify-center gap-1.5">
-                <span className="text-sm">{icon}</span>
-                <span className="text-xs font-medium">{label}</span>
+            <div className="flex items-center justify-center gap-2">
+                <span className="text-base">{icon}</span>
+                <span className="text-xs font-semibold text-slate-900 dark:text-white">{label}</span>
             </div>
         </div>
     );
 };
 
-// ErrorNode component (restored)
-const ErrorNode = ({ data, selected }: { data: any; selected?: boolean }) => {
-    const { label, message, onDelete } = data || {};
+// Custom Error Node for Reaflow
+const CustomErrorNode = (props: ReaflowNodeProps) => {
+    const { properties } = props;
+    const { label, message, onDelete } = properties as any;
+
     return (
-        <div style={{ position: 'relative' }}>
-            <Handle
-                id="in-green"
-                type="target"
-                position={Position.Left}
-                isConnectable={true}
-                style={{
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    background: '#22c55e',
-                    border: '1px solid #16a34a',
-                    left: -8,
-                    zIndex: 20
-                }}
-            />
-
-            <div className={`px-3 py-2 bg-gradient-to-br from-red-800 to-red-900 border-2 border-red-600 rounded-lg shadow-lg min-w-[140px] max-w-[200px] ${selected ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-gray-900' : ''}`}>
-                <div className="text-white flex items-center gap-2">
-                    <span>⚠️</span>
-                    <div className="font-medium text-sm leading-tight flex-1">{label || 'Error'}</div>
+        <foreignObject width={200} height={80} x={0} y={0}>
+            <div 
+                className={`
+                    px-4 py-3 bg-red-50 dark:bg-red-950/20
+                    border-2 border-red-500 rounded-lg
+                    shadow-sm w-full h-full
+                `}
+                style={{ position: 'relative' }}
+            >
+                {/* Content */}
+                <div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <div className="text-lg">⚠️</div>
+                        <div className="font-semibold text-sm text-red-900 dark:text-red-200 truncate flex-1">
+                            {label || 'Error'}
+                        </div>
+                    </div>
+                    {message && (
+                        <div className="text-xs text-red-600 dark:text-red-300 truncate" title={message}>
+                            {message}
+                        </div>
+                    )}
                 </div>
-                {message && <div className="text-xs text-red-300 mt-1 truncate" title={message}>{message}</div>}
-            </div>
 
-            {/* Delete button for nodes */}
-            <div style={{ position: 'absolute', right: '4px', top: '4px', zIndex: 50 }}>
+                {/* Delete button - rounded square */}
                 <button
-                    onClick={(e) => { e.stopPropagation(); data?.onDelete?.() || onDelete?.(); }}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete?.(); 
+                    }}
                     title="Delete node"
-                    className="
-                        size-3 p-0 rounded-full text-gray-400 text-xs font-bold
-                        flex items-center justify-center bg-transparent
-                        hover:bg-red-500/30 hover:text-red-300
-                        transition-all duration-150 focus:outline-none border border-transparent hover:border-red-500/50
-                    "
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-sm leading-none text-xs font-bold"
                 >
                     ×
                 </button>
             </div>
-        </div>
+        </foreignObject>
     );
 };
 
@@ -1524,9 +1515,9 @@ const RulePalette = ({ onDragStart }: { onDragStart: (event: React.DragEvent, no
     ];
 
     return (
-        <div className="bg-card/90 border border-border rounded-lg p-3">
-            <h4 className="text-foreground font-medium text-sm mb-2">Rule Templates</h4>
-            <p className="text-muted-foreground text-xs mb-3">Drag to add to chain map</p>
+        <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3 shadow-lg pointer-events-auto">
+            <h4 className="font-semibold text-sm text-slate-900 dark:text-white mb-2">Rule Templates</h4>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">Drag to add to chain map</p>
             <div className="grid grid-cols-1 gap-2">
                 {ruleTemplates.map((template) => (
                     <DraggableRuleTemplate
@@ -1542,38 +1533,63 @@ const RulePalette = ({ onDragStart }: { onDragStart: (event: React.DragEvent, no
     );
 };
 
-// Custom Edge Components - with success/failure styling
-const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, sourceHandle, data }: any) => {
-    const edgePath = `M${sourceX},${sourceY} C${sourceX + 50},${sourceY} ${targetX - 50},${targetY} ${targetX},${targetY}`;
-    const isSuccess = sourceHandle === 'success' || data?.type === 'success';
-    const isFailure = sourceHandle === 'failure' || data?.type === 'failure';
+// Edge with color matching source handle - GUARANTEED COLOR MATCH
+const CustomEdge = ({ 
+    id, 
+    sourceX, 
+    sourceY, 
+    targetX, 
+    targetY, 
+    sourcePosition, 
+    targetPosition,
+    sourceHandle, 
+    data,
+    markerEnd,
+    style
+}: any) => {
+    // Use sourceHandle from data as fallback if prop is undefined
+    const actualSourceHandle = sourceHandle || data?.sourceHandle;
     
-    // Determine color based on connection type
-    let strokeColor = '#6366f1'; // Default blue
-    if (isSuccess) {
-        strokeColor = '#22c55e'; // Green for success
-    } else if (isFailure) {
-        strokeColor = '#ef4444'; // Red for failure
-    }
+    // EXACT Tailwind CSS color values - must match handle colors
+    const colorMap = {
+        'success': { color: '#22c55e', marker: 'arrow-green' },  // green-500
+        'failure': { color: '#ef4444', marker: 'arrow-red' },     // red-500
+        'default': { color: '#94a3b8', marker: 'arrow-gray' }     // slate-400
+    };
+    
+    const config = actualSourceHandle === 'success' ? colorMap.success :
+                   actualSourceHandle === 'failure' ? colorMap.failure :
+                   colorMap.default;
+    
+    
+    const [edgePath] = getBezierPath({
+        sourceX,
+        sourceY,
+        sourcePosition,
+        targetX,
+        targetY,
+        targetPosition,
+    });
     
     return (
         <path
             id={id}
-            style={{
-                stroke: strokeColor,
-                strokeWidth: 2,
-                fill: 'none'
-            }}
             className="react-flow__edge-path"
             d={edgePath}
+            strokeWidth={2.5}
+            stroke={config.color}
+            fill="none"
+            strokeLinecap="round"
+            markerEnd={`url(#${config.marker})`}
         />
     );
 };
 
+// Keep old React Flow node types for now (will be removed)
 const nodeTypes: NodeTypes = {
-    ruleNode: RuleNode,
-    actionNode: ActionNode,
-    errorNode: ErrorNode
+    ruleNode: (props: any) => <div>Migrating...</div>,
+    actionNode: (props: any) => <div>Migrating...</div>,
+    errorNode: (props: any) => <div>Migrating...</div>
 };
 
 const edgeTypes: EdgeTypes = {
@@ -1697,34 +1713,27 @@ function convertToReactFlowFormat(
             });
         });
 
-    // Create edges with enhanced styling
+    // Create edges - PRESERVE sourceHandle for color matching
     chainData.edges?.forEach((chainEdge, index) => {
-        // Determine color based on edge type
-        let strokeColor = '#6366f1'; // Default blue
+        // Determine sourceHandle based on edge type
+        let sourceHandleId: string | undefined = undefined;
         if (chainEdge.type === 'success') {
-            strokeColor = '#22c55e'; // Green
+            sourceHandleId = 'success';
         } else if (chainEdge.type === 'failure') {
-            strokeColor = '#ef4444'; // Red
+            sourceHandleId = 'failure';
         }
-
+        
         const edge: Edge = {
             id: `edge-${index}`,
             source: chainEdge.from,
             target: chainEdge.to,
-            sourceHandle: chainEdge.type === 'success' ? 'success' : 
-                          chainEdge.type === 'failure' ? 'failure' : undefined,
+            sourceHandle: sourceHandleId,  // CRITICAL: Must be preserved!
+            targetHandle: 'input',         // Always connect to input handle
             type: 'custom',
             animated: false,
-            style: { 
-                stroke: strokeColor,
-                strokeWidth: 2
-            },
-            markerEnd: {
-                type: MarkerType.ArrowClosed,
-                color: strokeColor
-            },
             data: {
-                type: chainEdge.type
+                type: chainEdge.type,
+                sourceHandle: sourceHandleId  // ALSO store in data as backup
             },
             deletable: true
         };
@@ -2165,29 +2174,15 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
                         <>
                             <div>
                                 <label className="block text-sm font-medium mb-2">Action Type</label>
-                                <Select 
-                                    value={editingNodeData?.actionType || '__none__'} 
-                                    onValueChange={(value) => setEditingNodeData({ 
-                                        ...editingNodeData, 
-                                        actionType: value === '__none__' ? '' : value,
-                                        // Clear template-specific data when changing action type
-                                        templateName: '',
-                                        inputParameters: {},
-                                        outputParameters: {}
-                                    })}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select Action Type" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="__none__">-- Select Action Type --</SelectItem>
-                                        {ACTION_OPTIONS.map(option => (
-                                            <SelectItem key={option.value} value={option.value}>
-                                                {option.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <div className="p-2 bg-muted rounded-md">
+                                    <span className="text-sm">
+                                        {editingNodeData?.actionType === "ExecuteOrchestratorWorkflowAction" 
+                                            ? "Execute Orchestrator Workflow" 
+                                            : editingNodeData?.actionType === "ExecuteGbgSchedulerProcessAction"
+                                            ? "Execute GBG Scheduler Process"
+                                            : editingNodeData?.actionType || "Unknown Action"}
+                                    </span>
+                                </div>
                             </div>
 
                             {/* TEMPLATE NAME (SELECT) — only show for template-driven actions */}
@@ -2382,6 +2377,7 @@ function ChainFlowDiagramInner({
     const [editingNodeType, setEditingNodeType] = React.useState<'rule' | 'action'>('rule');
     const [reactFlowInstance, setReactFlowInstance] = React.useState<ReactFlowInstance | null>(null);
     const { fitView, screenToFlowPosition } = useReactFlow();
+    
 
     // Handle node editing
     const handleNodeEdit = React.useCallback((nodeId: string, nodeType: 'rule' | 'action', data?: any) => {
@@ -2491,8 +2487,8 @@ function ChainFlowDiagramInner({
                 typeIdentifier: "Business Rule" // Ensure consistent type identifier
             };
             
-            // Set this as the current editing rule
-            onNodeClick(newRuleId);
+            // Don't call onNodeClick for new rules - they don't exist in API yet
+            // onNodeClick(newRuleId);
         } else if (type.startsWith('action-')) {
             // Extract action type from the dragged type
             const actionTypeMap: Record<string, string> = {
@@ -2576,34 +2572,18 @@ function ChainFlowDiagramInner({
 
     // Handle connection creation with canonical approach
     const onConnect = React.useCallback((connection: Connection) => {
-        // Detailed debug logging for connections and handle ids
-        console.log('CONNECTION OBJECT:', {
-            source: connection.source,
-            sourceHandle: connection.sourceHandle,
-            target: connection.target,
-            targetHandle: connection.targetHandle,
-            raw: connection
-        });
-
         if (!isEditable || !connection.source || !connection.target) return;
-
-        if (!connection.sourceHandle || !connection.targetHandle) {
-            console.error('MISSING HANDLE IDS in connection. sourceHandle or targetHandle is null/undefined');
-        }
 
         // Determine connection type based on source handle
         let connectionType: 'success' | 'failure' | 'connection' = 'connection';
-        let connectionColor = '#6366f1'; // Default blue
         
         if (connection.sourceHandle === 'success') {
             connectionType = 'success';
-            connectionColor = '#22c55e'; // Green
         } else if (connection.sourceHandle === 'failure') {
             connectionType = 'failure';
-            connectionColor = '#ef4444'; // Red
         }
         
-        // Use addEdge to properly create the edge
+        // Create edge - let CustomEdge component handle ALL styling
         const newEdge: Edge = {
             id: `edge-${Date.now()}`,
             source: connection.source,
@@ -2612,23 +2592,17 @@ function ChainFlowDiagramInner({
             targetHandle: connection.targetHandle,
             type: 'custom',
             animated: false,
-            style: {
-                stroke: connectionColor,
-                strokeWidth: 2
-            },
-            markerEnd: {
-                type: MarkerType.ArrowClosed,
-                color: connectionColor
-            },
             data: {
-                type: connectionType
+                type: connectionType,
+                sourceHandle: connection.sourceHandle  // Store in data for fallback
             },
             deletable: true
         };
 
+        // First update React Flow state immediately
         setEdges((eds) => addEdge(newEdge, eds));
         
-        // Update chain data
+        // Then update chain data (this will trigger useEffect but we'll skip it)
         if (onChainUpdate) {
             const newChainData = chainData ? { ...chainData } : { nodes: {}, edges: [] };
             if (!newChainData.edges) newChainData.edges = [];
@@ -2638,6 +2612,7 @@ function ChainFlowDiagramInner({
                 type: connectionType,
                 label: connectionType === 'success' ? 'Success' : connectionType === 'failure' ? 'Failure' : 'Connected'
             });
+            
             onChainUpdate(newChainData);
         }
         
@@ -2668,16 +2643,17 @@ function ChainFlowDiagramInner({
         }
     }, [setEdges, onChainUpdate, chainData]);
 
+    // Only sync nodes from chainData, NEVER sync edges (they're managed by onConnect)
     React.useEffect(() => {
         if (chainData && Object.keys(chainData.nodes).length > 0) {
-            const { nodes: newNodes, edges: newEdges } = convertToReactFlowFormat(
+            const { nodes: newNodes } = convertToReactFlowFormat(
                 chainData, 
                 stableOnNodeClick, 
                 stableHandleNodeEdit, 
                 stableHandleNodeDelete
             );
 
-            // Preserve manually adjusted positions
+            // Update nodes, preserving positions
             setNodes((currentNodes) => {
                 const positionMap = new Map(currentNodes.map(n => [n.id, n.position]));
                 return newNodes.map(node => ({
@@ -2685,15 +2661,13 @@ function ChainFlowDiagramInner({
                     position: positionMap.get(node.id) || node.position
                 }));
             });
-
-            setEdges(newEdges);
+            
+            // NEVER touch edges here - they're managed by onConnect/onDelete only
         } else {
-            // Always start with blank canvas
             setNodes([]);
             setEdges([]);
         }
-        // Intentionally depend only on chainData to avoid re-running on UI interactions
-    }, [chainData]);
+    }, [chainData, stableOnNodeClick, stableHandleNodeEdit, stableHandleNodeDelete, setNodes, setEdges]);
 
     if (isLoading) {
         return (
@@ -2720,7 +2694,7 @@ function ChainFlowDiagramInner({
     // }
 
     return (
-        <div className="w-full h-full bg-background relative">
+        <div className="w-full h-full bg-background relative" style={{ overflow: 'visible' }}>
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -2731,25 +2705,24 @@ function ChainFlowDiagramInner({
                 edgeTypes={edgeTypes}
                 nodesConnectable={true}
                 elementsSelectable={true}
-                connectionMode={ConnectionMode.Strict}
-                connectionLineType={ConnectionLineType.SmoothStep}
-                connectionRadius={36}
+                connectionMode={ConnectionMode.Loose}
+                connectionLineType={ConnectionLineType.Bezier}
+                connectionRadius={30}
                 connectionLineStyle={{
-                    strokeWidth: 4,
-                    stroke: '#6366f1',
-                    strokeDasharray: '8,4',
-                    filter: 'drop-shadow(0 0 8px #6366f1)'
+                    strokeWidth: 2.5,
+                    stroke: '#94a3b8',
+                    strokeDasharray: '5,5',
                 }}
                 snapToGrid={true}
                 snapGrid={[15, 15]}
                 fitView
                 fitViewOptions={{
-                    padding: 0.1,
+                    padding: 0.2,
                     includeHiddenNodes: false
                 }}
                 defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-                minZoom={0.2}
-                maxZoom={1.5}
+                minZoom={0.1}
+                maxZoom={2}
                 attributionPosition="bottom-left"
                 selectNodesOnDrag={false}
                 multiSelectionKeyCode="Shift"
@@ -2760,51 +2733,126 @@ function ChainFlowDiagramInner({
                 onDragOver={handleDragOver}
                 proOptions={{ hideAttribution: true }}
                 defaultEdgeOptions={{
-                    type: 'custom', // Use 'custom' type to ensure your existing CustomEdge component is rendered
-                    animated: false,
-                    style: { strokeWidth: 2, stroke: 'hsl(var(--foreground))' } // Use foreground color for better contrast
+                    type: 'custom',
+                    animated: false
                 }}
             >
+                {/* Global SVG marker definitions for arrows */}
+                <svg style={{ position: 'absolute', width: 0, height: 0 }}>
+                    <defs>
+                        <marker
+                            id="arrow-green"
+                            markerWidth="12"
+                            markerHeight="12"
+                            viewBox="-10 -10 20 20"
+                            markerUnits="strokeWidth"
+                            orient="auto"
+                            refX="0"
+                            refY="0"
+                        >
+                            <polyline
+                                stroke="#22c55e"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1"
+                                fill="#22c55e"
+                                points="-5,-4 0,0 -5,4 -5,-4"
+                            />
+                        </marker>
+                        <marker
+                            id="arrow-red"
+                            markerWidth="12"
+                            markerHeight="12"
+                            viewBox="-10 -10 20 20"
+                            markerUnits="strokeWidth"
+                            orient="auto"
+                            refX="0"
+                            refY="0"
+                        >
+                            <polyline
+                                stroke="#ef4444"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1"
+                                fill="#ef4444"
+                                points="-5,-4 0,0 -5,4 -5,-4"
+                            />
+                        </marker>
+                        <marker
+                            id="arrow-gray"
+                            markerWidth="12"
+                            markerHeight="12"
+                            viewBox="-10 -10 20 20"
+                            markerUnits="strokeWidth"
+                            orient="auto"
+                            refX="0"
+                            refY="0"
+                        >
+                            <polyline
+                                stroke="#94a3b8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1"
+                                fill="#94a3b8"
+                                points="-5,-4 0,0 -5,4 -5,-4"
+                            />
+                        </marker>
+                    </defs>
+                </svg>
+
                 <Background 
-                    className="bg-background"
-                    color="hsl(var(--border))" 
-                    gap={16} 
-                    size={0.5}
+                    className="bg-slate-50 dark:bg-slate-700"
+                    color="#cbd5e1" 
+                    gap={20} 
+                    size={1}
                     variant={BackgroundVariant.Dots}
                 />
                 <Controls 
-                    className="bg-card border-border text-foreground"
+                    className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm rounded-lg"
                     showInteractive={true}
                 />
                 <MiniMap 
-                    className="bg-card border border-border"
-                    maskColor="hsl(var(--background) / 0.1)"
+                    className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm rounded-lg"
+                    maskColor="rgba(100, 116, 139, 0.1)"
                     nodeColor={(node) => {
-                        if (node.type === 'errorNode') return '#dc2626';
+                        if (node.type === 'errorNode') return '#ef4444';
                         if (node.type === 'actionNode') {
                             const actionType = (node.data?.actionType || '') as string;
-                            if (actionType.includes('RuleEvaluation')) return '#14b8a6'; // teal
-                            if (actionType.includes('OrchestratorWorkflow')) return '#a855f7'; // purple
-                            if (actionType.includes('GbgScheduler')) return '#10b981'; // emerald
-                            return node.data?.isSuccess ? '#16a34a' : '#dc2626';
+                            if (actionType.includes('OrchestratorWorkflow')) return '#a855f7';
+                            if (actionType.includes('GbgScheduler')) return '#14b8a6';
+                            return '#10b981';
                         }
-                        return '#2563eb'; // Rule nodes are blue
+                        return '#3b82f6';
                     }}
-                    nodeStrokeWidth={1}
+                    nodeStrokeWidth={2}
                 />
 
                 {isEditable && (
-                    <Panel position="top-right" className="bg-card/90 border border-border rounded p-3">
-                        <div className="text-foreground space-y-2">
-                            <h3 className="font-medium text-xs">Chain Editor</h3>
-                            <div className="text-xs space-y-1 text-muted-foreground">
-                                <div>• <span className="text-blue-300">Click nodes</span> to edit properties</div>
-                                <div>• <span className="text-green-400">Small green circles</span> = Success paths</div>
-                                <div>• <span className="text-red-400">Small red circles</span> = Failure paths</div>
-                                <div>• <span className="text-gray-300">Small gray circles</span> = Input connections</div>
-                                <div>• <span className="text-yellow-300">Drag from circles</span> to connect nodes</div>
-                                <div>• <span className="text-red-300">Del key</span> to remove selection</div>
-                                <div>• <span className="text-purple-300">Hover handles</span> to see connection points</div>
+                    <Panel position="top-right" className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3 shadow-lg pointer-events-auto">
+                        <div className="space-y-2.5">
+                            <h3 className="font-semibold text-sm text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">Chain Editor</h3>
+                            <div className="text-xs space-y-1.5">
+                                <div className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-700/50 p-1.5 rounded transition-colors cursor-default" title="Click any node to open its properties">
+                                    <span className="text-slate-700 dark:text-slate-300">• Click nodes to edit properties</span>
+                                </div>
+                                <div className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-700/50 p-1.5 rounded transition-colors cursor-default" title="Green circles represent success/true paths">
+                                    <div className="w-2.5 h-2.5 rounded-full bg-green-500 border border-white"></div>
+                                    <span className="text-slate-700 dark:text-slate-300">Success paths</span>
+                                </div>
+                                <div className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-700/50 p-1.5 rounded transition-colors cursor-default" title="Red circles represent failure/false paths">
+                                    <div className="w-2.5 h-2.5 rounded-full bg-red-500 border border-white"></div>
+                                    <span className="text-slate-700 dark:text-slate-300">Failure paths</span>
+                                </div>
+                                <div className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-700/50 p-1.5 rounded transition-colors cursor-default" title="Gray circles are input connection points">
+                                    <div className="w-2.5 h-2.5 rounded-full bg-slate-400 border border-white"></div>
+                                    <span className="text-slate-700 dark:text-slate-300">Input connections</span>
+                                </div>
+                                <div className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-700/50 p-1.5 rounded transition-colors cursor-default" title="Drag from any circle to create connections">
+                                    <span className="text-slate-700 dark:text-slate-300">• Drag from circles to connect</span>
+                                </div>
+                                <div className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-700/50 p-1.5 rounded transition-colors cursor-default" title="Press Delete key to remove selected node">
+                                    <span className="text-slate-700 dark:text-slate-300">• <kbd className="px-1 py-0.5 bg-slate-200 dark:bg-slate-700 rounded text-xs">Del</kbd> to remove</span>
+                                </div>
                             </div>
                         </div>
                     </Panel>
@@ -3935,10 +3983,10 @@ function App() {
     // Theme hook
     const { theme, toggleTheme } = useTheme();
     
-    // Persistent state using useKV for data that should survive page refreshes
-    const [jsonData, setJsonData] = useKV<Rule>("current-rule", DEFAULT_RULE_TEMPLATE);
-    const [rulesEngineRootURI, setRulesEngineRootURI] = useKV("rules-engine-uri", RULES_ENGINE_DEFAULT_URL);
-    const [dataServicesRootURI, setDataServicesRootURI] = useKV("data-services-uri", DATA_SERVICES_DEFAULT_URL);
+    // Persistent state using localStorage (replaced Spark's useKV)
+    const [jsonData, setJsonData] = useLocalStorage<Rule>("current-rule", DEFAULT_RULE_TEMPLATE);
+    const [rulesEngineRootURI, setRulesEngineRootURI] = useLocalStorage("rules-engine-uri", RULES_ENGINE_DEFAULT_URL);
+    const [dataServicesRootURI, setDataServicesRootURI] = useLocalStorage("data-services-uri", DATA_SERVICES_DEFAULT_URL);
 
     // Session state using useState for temporary UI state
     const [rulesEngineHealthStatus, setRulesEngineHealthStatus] = React.useState<HealthStatus>('idle');
@@ -3963,7 +4011,7 @@ function App() {
     // Chain map state - start with blank canvas
     const [isChainViewVisible, setIsChainViewVisible] = React.useState(false);
     const [ruleChainData, setRuleChainData] = React.useState<ChainData | null>({ nodes: {}, edges: [] });
-    const [chainStartRuleId, setChainStartRuleId] = useKV("chain-start-rule-id", "");
+    const [chainStartRuleId, setChainStartRuleId] = useLocalStorage("chain-start-rule-id", "");
     const [chainError, setChainError] = React.useState('');
     const [isLoading, setIsLoading] = React.useState({
         chainData: false,
@@ -4261,6 +4309,19 @@ function App() {
             // If this is the current rule being edited locally, use local data instead of API
             if (ruleId === currentRule?.id && currentRule) {
                 return currentRule;
+            }
+            
+            // Check if this is a newly generated rule ID that doesn't exist in the API yet
+            const isNewRule = ruleId.startsWith('RULE') && ruleId.length === 9;
+            if (isNewRule) {
+                console.warn(`Rule ${ruleId} appears to be a new rule that doesn't exist in the API yet`);
+                // Return a minimal rule structure for new rules
+                return {
+                    id: ruleId,
+                    name: ruleId,
+                    typeIdentifier: "Business Rule",
+                    properties: []
+                };
             }
             
             if (!fetchCache.has(ruleId)) {
@@ -4908,13 +4969,13 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                         <p className="text-destructive-foreground text-center">{chainError}</p>
                                     </div>
                                 )}
-                                <ChainFlowDiagram
+                                <ChainFlowReactFlow
                                     chainData={ruleChainData}
                                     onNodeClick={handleRuleNodeClick}
                                     onChainUpdate={handleChainUpdate}
                                     isLoading={isLoading.chainData}
                                     isEditable={true}
-                                    dataServicesRootURI={dataServicesRootURI}
+                                    dataServicesRootURI={dataServicesRootURI || ""}
                                 />
                             </div>
                         </div>
