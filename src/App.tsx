@@ -40,7 +40,8 @@ import {
     CaretRight,
     Download,
     Sun,
-    Moon
+    Moon,
+    Monitor
 } from "@phosphor-icons/react";
 import { toast } from 'sonner';
 
@@ -71,6 +72,7 @@ import SimpleRuleSelector from './SimpleRuleSelector';
 import { isSupportedAction, getSchema, isTemplateDrivenAction } from './action-schemas';
 import { useTheme } from './hooks/use-theme';
 import { ChainFlowReactFlow } from './ChainFlowReactFlow';
+import { SampleMonitor } from './components/SampleMonitor';
 
 import {
     ReactFlow,
@@ -3990,6 +3992,9 @@ function App() {
     // Theme hook
     const { theme, toggleTheme } = useTheme();
     
+    // App mode state (editor vs monitor)
+    const [appMode, setAppMode] = React.useState<'editor' | 'monitor'>('editor');
+    
     // Persistent state using localStorage (replaced Spark's useKV)
     const [jsonData, setJsonData] = useLocalStorage<Rule>("current-rule", DEFAULT_RULE_TEMPLATE);
     const [rulesEngineRootURI, setRulesEngineRootURI] = useLocalStorage("rules-engine-uri", RULES_ENGINE_DEFAULT_URL);
@@ -4808,32 +4813,52 @@ function App() {
 
     return (
         <div className="min-h-screen bg-background text-foreground">
-            <div className={isChainViewVisible ? 'w-full px-4 py-3 space-y-3' : 'container mx-auto p-6 space-y-6'}>
-                {/* Header */}
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between">
+            {/* Header */}
+            <div className={appMode === 'monitor' ? 'fixed top-0 left-0 right-0 z-50 bg-background border-b h-14' : ''}>
+                <div className={appMode === 'monitor' ? 'h-full flex items-center px-4' : isChainViewVisible ? 'px-4 py-3' : 'container mx-auto pt-6 px-6'}>
+                    <div className={appMode === 'monitor' ? 'flex items-center justify-between w-full' : 'flex items-center justify-between'}>
                         <div>
-                            <h1 className="text-3xl font-bold text-foreground">
-                                Biosero Rules Engine - Rule Editor
+                            <h1 className={appMode === 'monitor' ? 'text-xl font-bold' : 'text-3xl font-bold text-foreground'}>
+                                Biosero Rules Engine - {appMode === 'editor' ? 'Rule Editor' : 'Sample Monitor'}
                             </h1>
-                            <p className="text-muted-foreground">
-                                Create and manage business rules with action workflows
-                            </p>
+                            {appMode === 'editor' && (
+                                <p className="text-muted-foreground">
+                                    Create and manage business rules with action workflows
+                                </p>
+                            )}
                         </div>
-                        <Button
-                            onClick={toggleTheme}
-                            variant="outline"
-                            size="sm"
-                            className="gap-2"
-                            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-                        >
-                            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-                            {theme === 'dark' ? 'Light' : 'Dark'}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                onClick={() => setAppMode(appMode === 'editor' ? 'monitor' : 'editor')}
+                                variant="outline"
+                                size="sm"
+                                className="gap-2"
+                                title={`Switch to ${appMode === 'editor' ? 'monitor' : 'editor'} mode`}
+                            >
+                                <Monitor size={16} />
+                                {appMode === 'editor' ? 'Monitor' : 'Editor'}
+                            </Button>
+                            <Button
+                                onClick={toggleTheme}
+                                variant="outline"
+                                size="sm"
+                                className="gap-2"
+                                title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+                            >
+                                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                                {theme === 'dark' ? 'Light' : 'Dark'}
+                            </Button>
+                        </div>
                     </div>
                 </div>
+            </div>
 
-                {/* Toolbar */}
+            {/* Main Content */}
+            <div className={appMode === 'monitor' ? '' : isChainViewVisible ? 'w-full px-4 py-3 space-y-3' : 'container mx-auto p-6 space-y-6'}>
+                {/* Conditional rendering based on app mode */}
+                {appMode === 'editor' ? (
+                    <>
+                        {/* Toolbar */}
                 <Card>
                     <CardHeader className={isChainViewVisible ? 'pb-2' : 'pb-4'}>
                         <div className="flex flex-wrap gap-4 items-center justify-between">
@@ -5505,6 +5530,20 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                             )}
                         </Card>
                     </div>
+                )}
+                    </>
+                ) : (
+                    /* Monitor Mode */
+                    <SampleMonitor
+                        rulesEngineUrl={rulesEngineRootURI || ""}
+                        dataServicesUrl={dataServicesRootURI || ""}
+                        chainData={ruleChainData}
+                        onLoadRule={(ruleId) => {
+                            // Load rule and switch back to editor mode
+                            handleLoadRule(ruleId);
+                            setAppMode('editor');
+                        }}
+                    />
                 )}
             </div>
             
