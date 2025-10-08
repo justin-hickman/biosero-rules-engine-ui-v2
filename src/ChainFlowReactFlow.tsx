@@ -84,6 +84,11 @@ interface ChainNode {
     templateName?: string;
     inputParameters?: Record<string, any>;
     outputParameters?: Record<string, any>;
+    // RuleEvaluationAction fields
+    targetRuleId?: string;
+    evaluationType?: string;
+    topic?: string;
+    variableMappings?: Record<string, any>;
     position?: { x: number; y: number }; // Store node position
     [key: string]: any;
 }
@@ -100,6 +105,7 @@ interface ChainFlowProps {
     isLoading?: boolean;
     isEditable?: boolean;
     dataServicesRootURI?: string;
+    autoArrangeOnLoad?: boolean;
 }
 
 // Custom Rule Node Component
@@ -250,7 +256,7 @@ const ActionNode: React.FC<NodeProps> = ({ data, isConnectable, selected, id }) 
             className={`
                 relative bg-white dark:bg-slate-800 border-2 rounded-lg shadow-md
                 ${selected ? 'border-purple-500 shadow-lg' : 'border-slate-300 dark:border-slate-600'}
-                transition-all duration-200 min-w-[180px] cursor-pointer
+                transition-all duration-200 min-w-[300px] cursor-pointer
             `}
         >
             <Handle
@@ -383,20 +389,28 @@ const generateRuleId = () => {
     return result;
 };
 
+// Snap position to grid
+const snapToGrid = (position: { x: number; y: number }, gridSize: number = 20): { x: number; y: number } => {
+    return {
+        x: Math.round(position.x / gridSize) * gridSize,
+        y: Math.round(position.y / gridSize) * gridSize,
+    };
+};
+
 // Auto-layout function using dagre with success/failure path prioritization
 const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'LR') => {
     const dagreGraph = new dagre.graphlib.Graph();
     dagreGraph.setDefaultEdgeLabel(() => ({}));
     
-    const nodeWidth = 220;
+    const nodeWidth = 320; // Increased to match wider action nodes
     const nodeHeight = 100;
     
     // Configure for better hierarchical layout with branching
     dagreGraph.setGraph({ 
         rankdir: direction, 
-        nodesep: 120, // Horizontal spacing between nodes
-        ranksep: 200, // Vertical spacing between ranks
-        edgesep: 50,  // Spacing between edges
+        nodesep: 150, // Increased horizontal spacing between nodes
+        ranksep: 250, // Increased vertical spacing between ranks
+        edgesep: 80,  // Increased spacing between edges
         ranker: 'network-simplex', // Better algorithm for complex graphs
         align: 'DL'   // Align nodes down-left for cleaner look
     });
@@ -420,10 +434,10 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'LR') => 
             ...node,
             targetPosition: Position.Left,
             sourcePosition: Position.Right,
-            position: {
+            position: snapToGrid({
                 x: nodeWithPosition.x - nodeWidth / 2,
                 y: nodeWithPosition.y - nodeHeight / 2,
-            },
+            }),
         };
         
         return newNode;
@@ -512,11 +526,15 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
     onChainUpdate,
     isLoading,
     isEditable = true,
-    dataServicesRootURI
+    dataServicesRootURI,
+    autoArrangeOnLoad = false
 }) => {
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const { screenToFlowPosition, fitView } = useReactFlow();
+    
+    // Track if we've auto-arranged for current chainData
+    const [hasAutoArranged, setHasAutoArranged] = React.useState(false);
     
     // Edit dialog state
     const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
@@ -657,50 +675,151 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
     const handleNodesChange = React.useCallback((changes: any) => {
         onNodesChange(changes);
         
-        // Update chainData when nodes are moved
-        if (onChainUpdate && chainData) {
-            const positionChange = changes.find((c: any) => c.type === 'position' && c.dragging === false);
-            if (positionChange) {
-                const node = nodes.find(n => n.id === positionChange.id);
-                if (node) {
-                    const updatedChainData = {
-                        ...chainData,
-                        nodes: {
-                            ...chainData.nodes,
-                            [node.id]: {
-                                ...chainData.nodes[node.id],
-                                position: node.position
-                            }
-                        }
+        // Batch position updates and only update chainData after dragging is complete
+        const positionChanges = changes.filter((c: any) => c.type === 'position' && c.dragging === false);
+        
+        if (positionChanges.length > 0 && onChainUpdate && chainData) {
+            // Get all current node positions from React Flow
+            const currentNodes = nodes;
+            const updatedNodes = { ...chainData.nodes };
+            
+            // Update positions for all nodes that were moved
+            positionChanges.forEach((change: any) => {
+                const node = currentNodes.find(n => n.id === change.id);
+                if (node && updatedNodes[node.id]) {
+                    updatedNodes[node.id] = {
+                        ...updatedNodes[node.id],
+                        position: node.position
                     };
-                    onChainUpdate(updatedChainData);
                 }
-            }
+            });
+            
+            const updatedChainData = {
+                ...chainData,
+                nodes: updatedNodes
+            };
+            
+            onChainUpdate(updatedChainData);
         }
     }, [onNodesChange, nodes, chainData, onChainUpdate]);
+    
+    // Handle edge changes (especially deletions)
+    const handleEdgesChange = React.useCallback((changes: any) => {
+        onEdgesChange(changes);
+        
+        // Update chainData when edges are removed
+        if (onChainUpdate && chainData) {
+            const removeChanges = changes.filter((c: any) => c.type === 'remove');
+            if (removeChanges.length > 0) {
+                let updatedEdges = [...chainData.edges];
+                
+                removeChanges.forEach((change: any) => {
+                    const edge = edges.find(e => e.id === change.id);
+                    if (edge) {
+                        // Remove the edge from chainData
+                        updatedEdges = updatedEdges.filter(e => 
+                            !(e.from === edge.source && e.to === edge.target && 
+                              e.type === (edge.sourceHandle as 'success' | 'failure' || 'connection'))
+                        );
+                    }
+                });
+                
+                const updatedChainData = {
+                    ...chainData,
+                    edges: updatedEdges
+                };
+                onChainUpdate(updatedChainData);
+            }
+        }
+    }, [edges, chainData, onChainUpdate, onEdgesChange]);
+    
+    // Track previous node count to detect when a new chain is loaded
+    const prevNodeCountRef = React.useRef(0);
+    const prevChainDataRef = React.useRef<ChainData | null>(null);
     
     // Convert chainData to React Flow format
     React.useEffect(() => {
         if (!chainData || Object.keys(chainData.nodes).length === 0) {
             setNodes([]);
             setEdges([]);
+            prevNodeCountRef.current = 0;
+            prevChainDataRef.current = null;
             return;
         }
         
         const nodeList = Object.values(chainData.nodes);
+        const currentNodeCount = nodeList.length;
+        
+        // Check if this is just a position update by comparing non-position properties
+        let isJustPositionUpdate = false;
+        
+        if (prevChainDataRef.current) {
+            const prevNodes = prevChainDataRef.current.nodes;
+            const currNodes = chainData.nodes;
+            
+            // Must have the same number of nodes
+            const sameNodeCount = Object.keys(prevNodes).length === Object.keys(currNodes).length;
+            
+            // All node IDs must be the same
+            const sameNodeIds = sameNodeCount && 
+                Object.keys(prevNodes).every(id => currNodes[id]) &&
+                Object.keys(currNodes).every(id => prevNodes[id]);
+            
+            // Check if non-position properties are identical
+            const sameNodeProperties = sameNodeIds && Object.keys(currNodes).every(nodeId => {
+                const prev = prevNodes[nodeId];
+                const curr = currNodes[nodeId];
+                return prev.label === curr.label &&
+                       prev.actionType === curr.actionType &&
+                       prev.ruleId === curr.ruleId &&
+                       prev.expression === curr.expression &&
+                       prev.templateName === curr.templateName &&
+                       prev.isInitiating === curr.isInitiating;
+            });
+            
+            // Must have the same edges
+            const sameEdges = chainData.edges.length === prevChainDataRef.current.edges.length;
+            
+            isJustPositionUpdate = sameNodeCount && sameNodeIds && sameNodeProperties && sameEdges;
+        }
+        
+        // If it's just a position update, don't recreate nodes
+        if (isJustPositionUpdate) {
+            prevChainDataRef.current = chainData;
+            return;
+        }
+        
+        // Check if this is a completely new chain (significant change in node count)
+        // Only reset auto-arrange if going from 0 nodes to many, or many to 0
+        const isNewChain = (prevNodeCountRef.current === 0 && currentNodeCount > 0) || 
+                          (prevNodeCountRef.current > 0 && currentNodeCount === 0) ||
+                          (Math.abs(currentNodeCount - prevNodeCountRef.current) > 5); // Increased threshold
+        if (isNewChain && autoArrangeOnLoad) {
+            // Only reset auto-arrange flag if autoArrangeOnLoad is enabled
+            setHasAutoArranged(false);
+        }
+        prevNodeCountRef.current = currentNodeCount;
+        prevChainDataRef.current = chainData;
+        
         const baseX = 200;
         const baseY = 200;
-        const spacing = 300;
+        const spacing = 350; // Increased spacing for wider nodes
         
         // Convert nodes to React Flow format
         const reactFlowNodes: Node[] = nodeList.map((node, index) => {
             const isAction = !!node.actionType;
             
-            // Use existing position if available, otherwise create initial position
-            const position = node.position || {
-                x: baseX + (index * spacing),
-                y: baseY + (Math.random() * 100 - 50) // Add some vertical variation
-            };
+            // Calculate position in a grid layout if not provided
+            let position = node.position;
+            if (!position) {
+                // Create a more structured layout for new nodes
+                const row = Math.floor(index / 3); // 3 nodes per row
+                const col = index % 3;
+                position = {
+                    x: baseX + (col * spacing),
+                    y: baseY + (row * 150) + (col % 2 === 0 ? 0 : 50) // Slight offset for visual appeal
+                };
+            }
             
             return {
                 id: node.id,
@@ -769,18 +888,27 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
         
         // Update chain data
         if (onChainUpdate && chainData) {
-            const updatedChainData = {
-                ...chainData,
-                edges: [
-                    ...chainData.edges,
-                    {
-                        from: connection.source,
-                        to: connection.target,
-                        type: (connection.sourceHandle as 'success' | 'failure') || 'connection'
-                    }
-                ]
-            };
-            onChainUpdate(updatedChainData);
+            // Check if this edge already exists to prevent duplicates
+            const edgeExists = chainData.edges.some(edge => 
+                edge.from === connection.source && 
+                edge.to === connection.target &&
+                edge.type === ((connection.sourceHandle as 'success' | 'failure') || 'connection')
+            );
+            
+            if (!edgeExists) {
+                const updatedChainData = {
+                    ...chainData,
+                    edges: [
+                        ...chainData.edges,
+                        {
+                            from: connection.source,
+                            to: connection.target,
+                            type: (connection.sourceHandle as 'success' | 'failure') || 'connection'
+                        }
+                    ]
+                };
+                onChainUpdate(updatedChainData);
+            }
         }
         
         toast.success('Connection created!');
@@ -799,10 +927,13 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
         const type = event.dataTransfer.getData('application/reactflow');
         if (!type) return;
         
-        const position = screenToFlowPosition({
+        const rawPosition = screenToFlowPosition({
             x: event.clientX,
             y: event.clientY,
         });
+        
+        // Snap to grid for cleaner placement
+        const position = snapToGrid(rawPosition);
         
         const newNodeId = `${type}-${Date.now()}`;
         let newNode: Node;
@@ -875,6 +1006,8 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 }
             };
             onChainUpdate(updatedChainData);
+            
+            // Don't auto-arrange - let user position manually
         }
     }, [onNodeClick, handleNodeDelete, handleNodeEdit, chainData, onChainUpdate, screenToFlowPosition]);
     
@@ -889,13 +1022,47 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
         setNodes([...layoutedNodes]);
         setEdges([...layoutedEdges]);
         
+        // Save all the new positions to chainData
+        if (onChainUpdate && chainData) {
+            const updatedNodes: Record<string, ChainNode> = {};
+            
+            // Update positions for all nodes
+            layoutedNodes.forEach(node => {
+                if (chainData.nodes[node.id]) {
+                    updatedNodes[node.id] = {
+                        ...chainData.nodes[node.id],
+                        position: node.position
+                    };
+                }
+            });
+            
+            const updatedChainData = {
+                ...chainData,
+                nodes: updatedNodes
+            };
+            
+            onChainUpdate(updatedChainData);
+        }
+        
         // Fit view after a short delay to ensure layout is applied
         window.requestAnimationFrame(() => {
             fitView({ padding: 0.2, duration: 400 });
         });
         
         toast.success('Layout arranged!');
-    }, [nodes, edges, fitView]);
+    }, [nodes, edges, fitView, chainData, onChainUpdate]);
+    
+    // Auto-arrange ONLY on initial load if requested
+    React.useEffect(() => {
+        if (autoArrangeOnLoad && nodes.length > 0 && !hasAutoArranged) {
+            // Small delay to ensure nodes are rendered
+            setTimeout(() => {
+                handleAutoLayout();
+                setHasAutoArranged(true);
+            }, 100);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoArrangeOnLoad, nodes.length, hasAutoArranged]); // handleAutoLayout excluded to prevent circular deps
     
     return (
         <NodeHandlersContext.Provider value={{ onEdit: handleNodeEdit, onDelete: handleNodeDelete }}>
@@ -919,13 +1086,18 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={isEditable ? handleNodesChange : undefined}
-                onEdgesChange={isEditable ? onEdgesChange : undefined}
+                onEdgesChange={isEditable ? handleEdgesChange : undefined}
                 onConnect={onConnect}
                 onDragOver={onDragOver}
                 onDrop={onDrop}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 fitView={false} // Don't auto-fit on load to preserve positions
+                snapToGrid={true}
+                snapGrid={[20, 20]} // 20px grid for cleaner alignment
+                nodesDraggable={isEditable}
+                nodesConnectable={isEditable}
+                elementsSelectable={isEditable}
                 fitViewOptions={{ padding: 0.2 }}
                 deleteKeyCode={isEditable ? ['Delete', 'Backspace'] : undefined}
                 selectionOnDrag={false}
@@ -935,9 +1107,6 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 zoomOnPinch={true}
                 zoomOnDoubleClick={false}
                 preventScrolling={true} // Prevent page scroll
-                nodesDraggable={isEditable}
-                nodesConnectable={isEditable}
-                elementsSelectable={isEditable}
                 selectNodesOnDrag={false}
                 nodeDragThreshold={1} // Make nodes less sticky
                 panActivationKeyCode="Space" // Space + left click also pans
@@ -1060,7 +1229,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                 <p className="font-medium">Navigation:</p>
                                 <p>• Left-click drag nodes</p>
                                 <p>• Right-click drag to pan</p>
-                                <p>• Space + drag to pan</p>
+                                <p>• Left-Click + drag to pan</p>
                                 <p>• Scroll to zoom</p>
                             </div>
                         </div>
@@ -1071,7 +1240,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             {/* Action Edit Dialog */}
             {isEditDialogOpen && editingNode && editingNodeType === 'action' && (
                 <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                    <DialogContent className={`${(selectedTemplateDetails?.inputParameters?.length > 0 || selectedTemplateDetails?.outputParameters?.length > 0 || editingNode?.actionType === 'RuleEvaluationAction') ? 'max-w-4xl' : 'max-w-2xl'} max-h-[85vh] overflow-y-auto`}>
+                    <DialogContent className="w-[95vw] max-w-[1400px] max-h-[85vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>Edit Action Node</DialogTitle>
                             <DialogDescription>
@@ -1250,11 +1419,15 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                                 });
                                             } catch (error) {
                                                 // Invalid JSON, just store as is for user to fix
+                                                setEditingNode({
+                                                    ...editingNode,
+                                                    variableMappings: e.target.value
+                                                });
                                             }
                                         }}
                                         placeholder='{\n  "sourceVar": "targetVar"\n}'
-                                        className="font-mono text-xs min-h-[100px]"
-                                        rows={4}
+                                        className="font-mono text-sm min-h-[150px] w-full"
+                                        rows={6}
                                     />
                                 </div>
                             )}
@@ -1287,7 +1460,9 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                                 outputParameters: editingNode.outputParameters || {},
                                                 targetRuleId: editingNode.targetRuleId || '',
                                                 evaluationType: editingNode.evaluationType || '',
-                                                variableMappings: editingNode.variableMappings || {}
+                                                variableMappings: typeof editingNode.variableMappings === 'string' 
+                                                    ? {} 
+                                                    : editingNode.variableMappings || {}
                                             }
                                         }
                                     };
@@ -1304,7 +1479,12 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                                     actionType: editingNode.actionType,
                                                     templateName: editingNode.templateName || '',
                                                     inputParameters: editingNode.inputParameters || {},
-                                                    outputParameters: editingNode.outputParameters || {}
+                                                    outputParameters: editingNode.outputParameters || {},
+                                                    targetRuleId: editingNode.targetRuleId || '',
+                                                    evaluationType: editingNode.evaluationType || '',
+                                                    variableMappings: typeof editingNode.variableMappings === 'string' 
+                                                    ? {} 
+                                                    : editingNode.variableMappings || {}
                                                 } 
                                             }
                                             : node
@@ -1324,7 +1504,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             {/* Rule Edit Dialog */}
             {isEditDialogOpen && editingNode && editingNodeType === 'rule' && (
                 <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="w-[85vw] max-w-[1000px]">
                         <DialogHeader>
                             <DialogTitle>Edit Rule Node</DialogTitle>
                             <DialogDescription>

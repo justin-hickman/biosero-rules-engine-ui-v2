@@ -160,6 +160,7 @@ type ApiResponseResult = {
 type ChainNode = {
     id: string;
     label: string;
+    ruleId?: string;
     expression?: string;
     successActions?: string[];
     failureActions?: string[];
@@ -171,6 +172,12 @@ type ChainNode = {
     templateName?: string;
     inputParameters?: Record<string, any>;
     outputParameters?: Record<string, any>;
+    // RuleEvaluationAction fields
+    targetRuleId?: string;
+    evaluationType?: string;
+    topic?: string;
+    variableMappings?: Record<string, any>;
+    position?: { x: number; y: number }; // Store node position
 };
 
 type ChainData = {
@@ -4013,6 +4020,7 @@ function App() {
     const [ruleChainData, setRuleChainData] = React.useState<ChainData | null>({ nodes: {}, edges: [] });
     const [chainStartRuleId, setChainStartRuleId] = useLocalStorage("chain-start-rule-id", "");
     const [chainError, setChainError] = React.useState('');
+    const [hasUnsavedChainChanges, setHasUnsavedChainChanges] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState({
         chainData: false,
         rule: false,
@@ -4151,16 +4159,118 @@ function App() {
         return Array.isArray(parsed.Actions) ? parsed.Actions : [];
     };
 
+    // Convert chain data to rule actions format
+    const convertChainDataToRuleActions = (chainData: ChainData, ruleId: string): { onSuccess: Action[], onFailure: Action[] } => {
+        const onSuccessActions: Action[] = [];
+        const onFailureActions: Action[] = [];
+        
+        if (!chainData || !chainData.edges || !chainData.nodes) {
+            return { onSuccess: onSuccessActions, onFailure: onFailureActions };
+        }
+        
+        // Find all edges from the current rule
+        const outgoingEdges = chainData.edges.filter(edge => edge.from === ruleId);
+        
+        outgoingEdges.forEach(edge => {
+            const targetNode = chainData.nodes[edge.to];
+            if (!targetNode) return;
+            
+            // Check if target is an action node
+            if (targetNode.actionType) {
+                const action: Action = {
+                    _uid: generateUid(),
+                    ActionType: targetNode.actionType,
+                    RuleName: jsonData?.name || "Rule1",
+                    Status: "Success",
+                    Timestamp: new Date().toISOString()
+                };
+                
+                // Add template-specific fields
+                if (targetNode.actionType === "ExecuteOrchestratorWorkflowAction" || 
+                    targetNode.actionType === "ExecuteGbgSchedulerProcessAction") {
+                    action.TemplateName = targetNode.templateName || "";
+                    action.InputParameters = targetNode.inputParameters || {};
+                    action.OutputParameters = targetNode.outputParameters || {};
+                } else if (targetNode.actionType === "RuleEvaluationAction") {
+                    action.EvaluationType = targetNode.evaluationType || "Single";
+                    action.Topic = targetNode.topic || "";
+                    action.RuleAction = "use";
+                    action.TargetRuleId = targetNode.targetRuleId || "";
+                    action.VariableMappings = targetNode.variableMappings || {};
+                }
+                
+                // Add to appropriate array based on edge type
+                if (edge.type === 'success') {
+                    onSuccessActions.push(action);
+                } else if (edge.type === 'failure') {
+                    onFailureActions.push(action);
+                }
+            } else if (targetNode.id && targetNode.id !== ruleId) {
+                // It's a rule node - create a RuleEvaluationAction
+                const action: Action = {
+                    _uid: generateUid(),
+                    ActionType: "RuleEvaluationAction",
+                    EvaluationType: "Single",
+                    Topic: "",
+                    RuleName: jsonData?.name || "Rule1",
+                    Status: "Success",
+                    Timestamp: new Date().toISOString(),
+                    VariableMappings: {},
+                    RuleAction: "use",
+                    TargetRuleId: targetNode.id
+                };
+                
+                if (edge.type === 'success') {
+                    onSuccessActions.push(action);
+                } else if (edge.type === 'failure') {
+                    onFailureActions.push(action);
+                }
+            }
+        });
+        
+        return { onSuccess: onSuccessActions, onFailure: onFailureActions };
+    };
+
     const handleUploadToApi = async () => {
         if (!jsonData || !dataServicesRootURI) {
             toast.error("Rule data or Data Services URL is missing");
             return;
         }
 
+        // Check if we need to apply chain data updates
+        let ruleToUpload = jsonData;
+        if (ruleChainData && jsonData.id && ruleChainData.nodes[jsonData.id]) {
+            // Convert chain data to actions
+            const { onSuccess: chainOnSuccess, onFailure: chainOnFailure } = convertChainDataToRuleActions(ruleChainData, jsonData.id);
+            
+            // Create a copy of the rule with updated actions
+            ruleToUpload = {
+                ...jsonData,
+                properties: jsonData.properties?.map(prop => {
+                    if (prop.name === "OnSuccess") {
+                        return {
+                            ...prop,
+                            value: { Actions: chainOnSuccess }
+                        };
+                    } else if (prop.name === "OnFailure") {
+                        return {
+                            ...prop,
+                            value: { Actions: chainOnFailure }
+                        };
+                    }
+                    return prop;
+                }) || []
+            };
+            
+            // Also update the local jsonData to reflect the changes
+            setJsonData(ruleToUpload);
+            toast.info("Chain map changes applied to rule");
+        }
+
         // Validate actions
         const errors: string[] = [];
-        const onSuccessProperty = jsonData.properties?.find(p => p.name === "OnSuccess");
-        const onFailureProperty = jsonData.properties?.find(p => p.name === "OnFailure");
+        const onSuccessProperty = ruleToUpload.properties?.find(p => p.name === "OnSuccess");
+        const onFailureProperty = ruleToUpload.properties?.find(p => p.name === "OnFailure");
         const onSuccess = collectActions(onSuccessProperty);
         const onFailure = collectActions(onFailureProperty);
         const allActions = [...onSuccess, ...onFailure];
@@ -4193,11 +4303,11 @@ function App() {
         setIsLoading(prev => ({ ...prev, upload: true }));
 
         try {
-            const result = await apiUploadRule(dataServicesRootURI, jsonData);
+            const result = await apiUploadRule(dataServicesRootURI, ruleToUpload);
             handleShowResponse({
                 success: true,
                 title: "Upload Successful",
-                message: `Rule '${jsonData.name}' (${result.uploadedRuleId}) uploaded successfully.`,
+                message: `Rule '${ruleToUpload.name}' (${result.uploadedRuleId}) uploaded successfully.`,
                 endpoint: result.endpoint,
                 status: `${result.status} ${result.statusText}`,
                 rawResponse: result.rawResponse,
@@ -4311,23 +4421,24 @@ function App() {
                 return currentRule;
             }
             
-            // Check if this is a newly generated rule ID that doesn't exist in the API yet
-            const isNewRule = ruleId.startsWith('RULE') && ruleId.length === 9;
-            if (isNewRule) {
-                console.warn(`Rule ${ruleId} appears to be a new rule that doesn't exist in the API yet`);
-                // Return a minimal rule structure for new rules
-                return {
-                    id: ruleId,
-                    name: ruleId,
-                    typeIdentifier: "Business Rule",
-                    properties: []
-                };
-            }
-            
+            // Try to fetch from API first
             if (!fetchCache.has(ruleId)) {
                 fetchCache.set(ruleId, apiFetchRuleDetails(dataServicesRootURI, ruleId));
             }
-            return fetchCache.get(ruleId)!;
+            
+            try {
+                const apiResult = await fetchCache.get(ruleId)!;
+                // Parse the API result to ensure consistent structure
+                const parsedRule = parseRuleFromApi(apiResult, ruleId);
+                return parsedRule;
+            } catch (error: any) {
+                // If fetch fails (404 or other error), check if it's the current rule
+                if (ruleId === currentRule?.id && currentRule) {
+                    return currentRule;
+                }
+                // Otherwise throw the error to be handled by the caller
+                throw error;
+            }
         };
 
         const addNode = (nodeId: string, data: Partial<ChainNode>) => {
@@ -4451,8 +4562,11 @@ function App() {
 
             processed.add(ruleId);
 
-            const onSuccess = parseActionsProp(details?.properties?.find((p: any) => p?.name === "OnSuccess"));
-            const onFailure = parseActionsProp(details?.properties?.find((p: any) => p?.name === "OnFailure"));
+            const onSuccessProp = details?.properties?.find((p: any) => p?.name === "OnSuccess");
+            const onFailureProp = details?.properties?.find((p: any) => p?.name === "OnFailure");
+            
+            const onSuccess = parseActionsProp(onSuccessProp);
+            const onFailure = parseActionsProp(onFailureProp);
 
             const nextPath = new Set(path);
             nextPath.add(ruleId);
@@ -4487,6 +4601,7 @@ function App() {
             console.log('Generated recursive chain with', Object.keys(graph.nodes).length, 'nodes and', graph.edges.length, 'edges');
             setRuleChainData(graph);
             setIsChainViewVisible(true);
+            setHasUnsavedChainChanges(false);
             toast.success(`Recursive chain map generated: ${Object.keys(graph.nodes).length} rules found`);
         } catch (error: any) {
             const message = error.message || 'Failed to generate chain';
@@ -4508,11 +4623,138 @@ function App() {
         }
     }, [dataServicesRootURI, setChainStartRuleId, handleShowResponse, jsonData]);
 
-    // Handle chain updates with a stable callback
+    // Handle chain updates locally (without saving to data services)
     const handleChainUpdate = React.useCallback((updatedChainData: ChainData) => {
         setRuleChainData(updatedChainData);
-        toast.success('Chain updated');
+        setHasUnsavedChainChanges(true);
+        toast.info('Chain updated (unsaved)');
     }, []);
+    
+    // Save chain to data services
+    const saveChainToDataServices = React.useCallback(async () => {
+        if (!ruleChainData) {
+            toast.warning('No chain data to save');
+            return;
+        }
+        
+        if (!dataServicesRootURI) {
+            toast.warning('Cannot save chain: Data services URI not configured');
+            return;
+        }
+        
+        setIsLoading(prev => ({ ...prev, chainData: true }));
+        
+        try {
+            const ruleNodes = Object.entries(ruleChainData.nodes)
+                .filter(([_, node]) => node.ruleId && !node.actionType);
+            
+            let savedCount = 0;
+            let errorCount = 0;
+            let skippedCount = 0;
+            
+            // Process each rule in the chain
+            for (const [nodeId, node] of ruleNodes) {
+                try {
+                    // Fetch the current rule data
+                    let ruleData;
+                    try {
+                        ruleData = await apiFetchRuleDetails(dataServicesRootURI, node.ruleId!);
+                    } catch (fetchError: any) {
+                        // If rule doesn't exist (404), skip it - it needs to be created first
+                        if (fetchError.message?.includes('404') || fetchError.message?.includes('not found')) {
+                            console.warn(`Skipping rule ${node.ruleId}: Rule doesn't exist in data services yet`);
+                            skippedCount++;
+                            continue;
+                        }
+                        throw fetchError;
+                    }
+                    
+                    if (!ruleData || !ruleData.properties) {
+                        console.warn(`Skipping rule ${node.ruleId}: Invalid rule data`);
+                        skippedCount++;
+                        continue;
+                    }
+                    
+                    // Check if this is a new rule (has default template structure)
+                    const isNewRule = !ruleData.properties.find(p => p.name === 'RuleExpression')?.value || 
+                                     ruleData.description?.startsWith('New rule');
+                    if (isNewRule) {
+                        console.warn(`Skipping rule ${node.ruleId}: Rule needs to be created/saved first`);
+                        skippedCount++;
+                        continue;
+                    }
+                    
+                    // Convert chain connections to actions for this rule
+                    const { onSuccess, onFailure } = convertChainDataToRuleActions(ruleChainData, nodeId);
+                    
+                    // Update the rule's properties
+                    const updatedRule = {
+                        ...ruleData,
+                        properties: ruleData.properties.map(prop => {
+                            if (prop.name === "OnSuccess") {
+                                return {
+                                    ...prop,
+                                    value: { Actions: onSuccess }
+                                };
+                            } else if (prop.name === "OnFailure") {
+                                return {
+                                    ...prop,
+                                    value: { Actions: onFailure }
+                                };
+                            }
+                            return prop;
+                        })
+                    };
+                    
+                    // Save the rule to data services
+                    const apiUrl = `${dataServicesRootURI}${dataServicesRootURI.endsWith('/') ? '' : '/'}api/v3.0/identities/${node.ruleId}`;
+                    const response = await fetch(apiUrl, {
+                        method: 'PUT',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(updatedRule),
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Failed to save rule ${node.ruleId}: ${response.statusText}`);
+                    }
+                    
+                    savedCount++;
+                } catch (error: any) {
+                    console.error(`Error saving rule ${node.ruleId}:`, error);
+                    errorCount++;
+                }
+            }
+            
+            if (savedCount > 0 && errorCount === 0) {
+                const message = skippedCount > 0 
+                    ? `Chain saved: ${savedCount} rules updated, ${skippedCount} skipped (not created yet)`
+                    : `Chain saved: ${savedCount} rules updated`;
+                toast.success(message);
+                setHasUnsavedChainChanges(false);
+            } else if (savedCount > 0 && errorCount > 0) {
+                const message = `Chain partially saved: ${savedCount} succeeded, ${errorCount} failed` +
+                    (skippedCount > 0 ? `, ${skippedCount} skipped` : '');
+                toast.warning(message);
+            } else if (errorCount > 0) {
+                const message = `Failed to save chain: ${errorCount} rules failed` +
+                    (skippedCount > 0 ? `, ${skippedCount} skipped` : '');
+                toast.error(message);
+            } else if (skippedCount > 0) {
+                toast.info(`No rules saved: ${skippedCount} rules need to be created first. Use the "Upload" button in the rule editor to save each rule.`);
+            } else {
+                toast.info('No rules to save');
+            }
+            
+        } catch (error: any) {
+            console.error('Error saving chain:', error);
+            toast.error('Failed to save chain changes');
+        } finally {
+            setIsLoading(prev => ({ ...prev, chainData: false }));
+        }
+    }, [dataServicesRootURI, ruleChainData]);
 
     // Handle clicking a node in the chain map
     const handleRuleNodeClick = React.useCallback((ruleId: string) => {
@@ -4921,6 +5163,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                                 setRuleChainData({ nodes: {}, edges: [] });
                                                 setChainStartRuleId("");
                                                 setChainError("");
+                                                setHasUnsavedChainChanges(false);
                                                 toast.success("New chain canvas cleared");
                                             }}
                                             size="sm"
@@ -4928,6 +5171,19 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                             title="Clear canvas and start a new rule chain"
                                         >
                                             New Chain
+                                        </Button>
+                                        <Button 
+                                            onClick={saveChainToDataServices}
+                                            size="sm"
+                                            className={`text-foreground px-2 h-6 text-xs ${
+                                                hasUnsavedChainChanges 
+                                                    ? 'bg-blue-600 hover:bg-blue-700' 
+                                                    : 'bg-gray-600 hover:bg-gray-700'
+                                            }`}
+                                            title="Save all chain changes to data services"
+                                            disabled={isLoading.chainData}
+                                        >
+                                            {isLoading.chainData ? 'Saving...' : hasUnsavedChainChanges ? 'Save Chain*' : 'Save Chain'}
                                         </Button>
                                         <Button 
                                             onClick={() => {
@@ -4976,6 +5232,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                     isLoading={isLoading.chainData}
                                     isEditable={true}
                                     dataServicesRootURI={dataServicesRootURI || ""}
+                                    autoArrangeOnLoad={true}
                                 />
                             </div>
                         </div>
