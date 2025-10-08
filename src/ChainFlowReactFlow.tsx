@@ -39,6 +39,8 @@ import { Textarea } from './components/ui/textarea';
 import { Checkbox } from './components/ui/checkbox';
 import dagre from 'dagre';
 import { apiFetchOrderTemplates, apiFetchOrderTemplateDetails } from './App';
+import SimpleRuleSelector from './SimpleRuleSelector';
+import { apiFetchRuleDetails } from './App';
 
 // Context for sharing handlers with node components
 const NodeHandlersContext = React.createContext<{
@@ -106,6 +108,7 @@ interface ChainFlowProps {
     isEditable?: boolean;
     dataServicesRootURI?: string;
     autoArrangeOnLoad?: boolean;
+    onLoadRuleWithChildren?: (ruleId: string) => Promise<void>;
 }
 
 // Custom Rule Node Component
@@ -527,7 +530,8 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
     isLoading,
     isEditable = true,
     dataServicesRootURI,
-    autoArrangeOnLoad = false
+    autoArrangeOnLoad = false,
+    onLoadRuleWithChildren
 }) => {
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -550,6 +554,11 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
     const [selectedTemplateDetails, setSelectedTemplateDetails] = React.useState<any>(null);
     const [isLoadingDetails, setIsLoadingDetails] = React.useState(false);
     const [detailsError, setDetailsError] = React.useState<string>("");
+    
+    // Rule selection dialog state
+    const [isRuleSelectDialogOpen, setIsRuleSelectDialogOpen] = React.useState(false);
+    const [pendingRuleDropPosition, setPendingRuleDropPosition] = React.useState<{ x: number; y: number } | null>(null);
+    const [selectedRuleId, setSelectedRuleId] = React.useState<string>("");
     
     // Fetch templates when action dialog opens for template-driven actions
     React.useEffect(() => {
@@ -939,20 +948,11 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
         let newNode: Node;
         
         if (type === 'rule') {
-            const newRuleId = generateRuleId();
-            newNode = {
-                id: newNodeId,
-                type: 'ruleNode',
-                position,
-                data: {
-                    label: `New Rule ${newRuleId}`,
-                    ruleId: newRuleId,
-                    expression: '',
-                    isInitiating: false,
-                    readonly: false,
-                    onClick: onNodeClick
-                }
-            };
+            // Show rule selection dialog instead of creating empty rule
+            setPendingRuleDropPosition(position);
+            setIsRuleSelectDialogOpen(true);
+            setSelectedRuleId("");
+            return;
         } else if (type.startsWith('action-')) {
             const actionTypeMap: Record<string, string> = {
                 'action-workflow': 'ExecuteOrchestratorWorkflowAction',
@@ -1010,6 +1010,96 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             // Don't auto-arrange - let user position manually
         }
     }, [onNodeClick, handleNodeDelete, handleNodeEdit, chainData, onChainUpdate, screenToFlowPosition]);
+    
+    // Handle rule selection from dialog
+    const handleRuleSelect = React.useCallback(async () => {
+        if (!selectedRuleId) {
+            toast.error("Please select a rule");
+            return;
+        }
+        
+        try {
+            // If we have the onLoadRuleWithChildren prop, use it to load the entire rule hierarchy
+            if (onLoadRuleWithChildren) {
+                // Close dialog first
+                setIsRuleSelectDialogOpen(false);
+                setPendingRuleDropPosition(null);
+                setSelectedRuleId("");
+                
+                // Load the rule with all its children
+                await onLoadRuleWithChildren(selectedRuleId);
+                
+                toast.success(`Loaded rule chain for: ${selectedRuleId}`);
+            } else {
+                // Fallback to single rule loading if onLoadRuleWithChildren is not provided
+                if (!pendingRuleDropPosition || !dataServicesRootURI) {
+                    toast.error("Missing required information");
+                    return;
+                }
+                
+                // Fetch rule details
+                const ruleDetails = await apiFetchRuleDetails(dataServicesRootURI, selectedRuleId);
+                if (!ruleDetails) {
+                    toast.error("Failed to fetch rule details");
+                    return;
+                }
+                
+                // Extract rule expression
+                const exprProp = ruleDetails.properties?.find((p: any) => 
+                    p?.name === "Expression" || p?.name === "Evaluation Lambda Expression"
+                );
+                const expression = exprProp?.value || "";
+                
+                // Create new node with fetched rule data
+                const newNodeId = `rule-${Date.now()}`;
+                const newNode: Node = {
+                    id: newNodeId,
+                    type: 'ruleNode',
+                    position: pendingRuleDropPosition,
+                    data: {
+                        label: ruleDetails.name || selectedRuleId,
+                        ruleId: selectedRuleId,
+                        expression: expression,
+                        isInitiating: false,
+                        readonly: false,
+                        onClick: onNodeClick
+                    }
+                };
+                
+                setNodes((nds) => [...nds, newNode]);
+                
+                // Update chain data
+                if (onChainUpdate && chainData) {
+                    const newChainNode: ChainNode = {
+                        id: selectedRuleId, // Use actual rule ID as node ID
+                        label: ruleDetails.name || selectedRuleId,
+                        ruleId: selectedRuleId,
+                        expression: expression,
+                        position: pendingRuleDropPosition
+                    };
+                    
+                    const updatedChainData = {
+                        ...chainData,
+                        nodes: {
+                            ...chainData.nodes,
+                            [selectedRuleId]: newChainNode
+                        }
+                    };
+                    onChainUpdate(updatedChainData);
+                }
+                
+                toast.success(`Added rule: ${ruleDetails.name || selectedRuleId}`);
+                
+                // Close dialog and reset state
+                setIsRuleSelectDialogOpen(false);
+                setPendingRuleDropPosition(null);
+                setSelectedRuleId("");
+            }
+        } catch (error: any) {
+            console.error("Failed to add rule:", error);
+            toast.error("Failed to add rule: " + (error.message || "Unknown error"));
+        }
+    }, [selectedRuleId, pendingRuleDropPosition, dataServicesRootURI, onNodeClick, chainData, onChainUpdate, onLoadRuleWithChildren]);
     
     // Auto-arrange nodes
     const handleAutoLayout = React.useCallback(() => {
@@ -1597,26 +1687,38 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                             <Button onClick={() => {
                                 // Update the node
                                 if (onChainUpdate && chainData && editingNode) {
+                                    const updatedNodes = { ...chainData.nodes };
+                                    
+                                    // If marking as initiating, unmark all other nodes
+                                    if (editingNode.isInitiating) {
+                                        Object.keys(updatedNodes).forEach(nodeId => {
+                                            if (updatedNodes[nodeId].isInitiating) {
+                                                updatedNodes[nodeId].isInitiating = false;
+                                            }
+                                        });
+                                    }
+                                    
+                                    // Update the edited node
+                                    updatedNodes[editingNode.id] = {
+                                        ...chainData.nodes[editingNode.id],
+                                        label: editingNode.label,
+                                        ruleId: editingNode.ruleId,
+                                        expression: editingNode.expression,
+                                        description: editingNode.description,
+                                        isInitiating: editingNode.isInitiating
+                                    };
+                                    
                                     const updatedChainData = {
                                         ...chainData,
-                                        nodes: {
-                                            ...chainData.nodes,
-                                            [editingNode.id]: {
-                                                ...chainData.nodes[editingNode.id],
-                                                label: editingNode.label,
-                                                ruleId: editingNode.ruleId,
-                                                expression: editingNode.expression,
-                                                description: editingNode.description,
-                                                isInitiating: editingNode.isInitiating
-                                            }
-                                        }
+                                        nodes: updatedNodes
                                     };
                                     onChainUpdate(updatedChainData);
                                     
-                                    // Update React Flow node
-                                    setNodes((nds) => nds.map((node) => 
-                                        node.id === editingNode.id 
-                                            ? { 
+                                    // Update React Flow nodes
+                                    setNodes((nds) => nds.map((node) => {
+                                        // If this is the edited node
+                                        if (node.id === editingNode.id) {
+                                            return { 
                                                 ...node, 
                                                 data: { 
                                                     ...node.data, 
@@ -1625,9 +1727,25 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                                     expression: editingNode.expression,
                                                     isInitiating: editingNode.isInitiating
                                                 } 
-                                            }
-                                            : node
-                                    ));
+                                            };
+                                        }
+                                        // If marking as initiating, unmark all other rule nodes
+                                        else if (editingNode.isInitiating && node.type === 'ruleNode') {
+                                            return {
+                                                ...node,
+                                                data: {
+                                                    ...node.data,
+                                                    isInitiating: false
+                                                }
+                                            };
+                                        }
+                                        return node;
+                                    }));
+                                    
+                                    // Show message if marked as initiating
+                                    if (editingNode.isInitiating) {
+                                        toast.success(`${editingNode.label} is now the starting rule`);
+                                    }
                                 }
                                 
                                 setIsEditDialogOpen(false);
@@ -1651,6 +1769,99 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                     </DialogContent>
                 </Dialog>
             )}
+            
+            {/* Rule Selection Dialog */}
+            <Dialog open={isRuleSelectDialogOpen} onOpenChange={setIsRuleSelectDialogOpen}>
+                <DialogContent className="w-[600px]">
+                    <DialogHeader>
+                        <DialogTitle>Select Existing Rule</DialogTitle>
+                        <DialogDescription>
+                            Choose an existing rule to add to the chain map. You can either create a new empty rule or select an existing rule with its current configuration.
+                        </DialogDescription>
+                        <div className="mt-2 text-xs text-muted-foreground">
+                            Note: Selecting a rule will load it with all its child rules and actions.
+                        </div>
+                    </DialogHeader>
+                    
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label>Select Rule</Label>
+                            <SimpleRuleSelector
+                                dataServicesRootURI={dataServicesRootURI || ""}
+                                onRuleSelect={setSelectedRuleId}
+                                value={selectedRuleId}
+                                placeholder="-- Select a rule --"
+                                disabled={false}
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                Select a rule to add it to the chain map at the dropped position.
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                // Create empty rule instead
+                                if (pendingRuleDropPosition) {
+                                    const newRuleId = generateRuleId();
+                                    const newNodeId = `rule-${Date.now()}`;
+                                    const newNode: Node = {
+                                        id: newNodeId,
+                                        type: 'ruleNode',
+                                        position: pendingRuleDropPosition,
+                                        data: {
+                                            label: `New Rule ${newRuleId}`,
+                                            ruleId: newRuleId,
+                                            expression: '',
+                                            isInitiating: false,
+                                            readonly: false,
+                                            onClick: onNodeClick
+                                        }
+                                    };
+                                    
+                                    setNodes((nds) => [...nds, newNode]);
+                                    
+                                    // Update chain data
+                                    if (onChainUpdate && chainData) {
+                                        const newChainNode: ChainNode = {
+                                            id: newNodeId,
+                                            label: `New Rule ${newRuleId}`,
+                                            ruleId: newRuleId,
+                                            expression: '',
+                                            position: pendingRuleDropPosition
+                                        };
+                                        
+                                        const updatedChainData = {
+                                            ...chainData,
+                                            nodes: {
+                                                ...chainData.nodes,
+                                                [newNodeId]: newChainNode
+                                            }
+                                        };
+                                        onChainUpdate(updatedChainData);
+                                    }
+                                    
+                                    toast.success("Added new empty rule");
+                                }
+                                
+                                setIsRuleSelectDialogOpen(false);
+                                setPendingRuleDropPosition(null);
+                                setSelectedRuleId("");
+                            }}
+                        >
+                            Create Empty Rule
+                        </Button>
+                        <Button
+                            onClick={handleRuleSelect}
+                            disabled={!selectedRuleId}
+                        >
+                            Add Selected Rule
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
             </div>
         </NodeHandlersContext.Provider>
     );

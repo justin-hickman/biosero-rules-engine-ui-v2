@@ -4627,13 +4627,95 @@ function App() {
             setIsLoading(prev => ({ ...prev, chainData: false }));
         }
     }, [dataServicesRootURI, setChainStartRuleId, handleShowResponse, jsonData]);
+    
+    // Add rule to existing chain map (merge instead of replace)
+    const handleAddRuleToChain = React.useCallback(async (ruleId: string) => {
+        if (!ruleId) {
+            toast.error("Please specify a rule ID");
+            return;
+        }
+
+        if (!dataServicesRootURI) {
+            toast.error("Data Services URL is required");
+            return;
+        }
+
+        console.log('Adding rule to existing chain:', ruleId);
+        setIsLoading(prev => ({ ...prev, chainData: true }));
+
+        try {
+            // Build the new rule's chain
+            const newGraph = await buildRuleChainRecursively(ruleId, dataServicesRootURI);
+            console.log('Generated chain for new rule with', Object.keys(newGraph.nodes).length, 'nodes and', newGraph.edges.length, 'edges');
+            
+            // Merge with existing chain data
+            if (ruleChainData) {
+                const mergedNodes = { ...ruleChainData.nodes };
+                const mergedEdges = [...ruleChainData.edges];
+                
+                // Add new nodes (checking for duplicates)
+                Object.entries(newGraph.nodes).forEach(([nodeId, node]) => {
+                    if (!mergedNodes[nodeId]) {
+                        mergedNodes[nodeId] = node;
+                    } else {
+                        // Node already exists, update position if needed
+                        console.log(`Node ${nodeId} already exists in chain`);
+                    }
+                });
+                
+                // Add new edges (checking for duplicates)
+                newGraph.edges.forEach(newEdge => {
+                    const edgeExists = mergedEdges.some(edge => 
+                        edge.from === newEdge.from && 
+                        edge.to === newEdge.to && 
+                        edge.type === newEdge.type
+                    );
+                    
+                    if (!edgeExists) {
+                        mergedEdges.push(newEdge);
+                    }
+                });
+                
+                const mergedData = { nodes: mergedNodes, edges: mergedEdges };
+                setRuleChainData(mergedData);
+                setHasUnsavedChainChanges(true);
+                
+                toast.success(`Added ${Object.keys(newGraph.nodes).length} rules to chain map`);
+                
+                // Show info about setting initiating rule
+                if (!chainStartRuleId) {
+                    toast.info('Select a rule and mark it as "Starting rule" to set the chain entry point');
+                }
+            } else {
+                // No existing chain, just set the new one
+                setRuleChainData(newGraph);
+                setHasUnsavedChainChanges(true);
+                toast.success(`Added ${Object.keys(newGraph.nodes).length} rules to chain map`);
+            }
+            
+            setIsChainViewVisible(true);
+        } catch (error: any) {
+            const message = error.message || 'Failed to add rule to chain';
+            console.error('Error adding rule to chain:', error);
+            toast.error(message);
+        } finally {
+            setIsLoading(prev => ({ ...prev, chainData: false }));
+        }
+    }, [dataServicesRootURI, ruleChainData, chainStartRuleId]);
 
     // Handle chain updates locally (without saving to data services)
     const handleChainUpdate = React.useCallback((updatedChainData: ChainData) => {
         setRuleChainData(updatedChainData);
         setHasUnsavedChainChanges(true);
+        
+        // Check if any node is marked as initiating and update chainStartRuleId
+        const initiatingNode = Object.values(updatedChainData.nodes).find(node => node.isInitiating);
+        if (initiatingNode && initiatingNode.ruleId) {
+            setChainStartRuleId(initiatingNode.ruleId);
+        }
+        
         toast.info('Chain updated (unsaved)');
-    }, []);
+    }, [setChainStartRuleId]);
     
     // Save chain to data services
     const saveChainToDataServices = React.useCallback(async () => {
@@ -5179,6 +5261,9 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                                 disabled={isLoading.chainData}
                                             />
                                         </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            (or mark any rule as "Starting rule" in its edit dialog)
+                                        </div>
                                     </div>
                                     
                                     {/* Right-aligned control buttons */}
@@ -5258,6 +5343,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                     isEditable={true}
                                     dataServicesRootURI={dataServicesRootURI || ""}
                                     autoArrangeOnLoad={true}
+                                    onLoadRuleWithChildren={handleAddRuleToChain}
                                 />
                             </div>
                         </div>
