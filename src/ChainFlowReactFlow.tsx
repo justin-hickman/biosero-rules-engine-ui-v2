@@ -1071,7 +1071,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             {/* Action Edit Dialog */}
             {isEditDialogOpen && editingNode && editingNodeType === 'action' && (
                 <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                    <DialogContent className={`${(selectedTemplateDetails?.inputParameters?.length > 0 || selectedTemplateDetails?.outputParameters?.length > 0 || editingNode?.actionType === 'RuleEvaluationAction') ? 'max-w-2xl' : 'max-w-md'} max-h-[85vh] overflow-y-auto`}>
+                    <DialogContent className={`${(selectedTemplateDetails?.inputParameters?.length > 0 || selectedTemplateDetails?.outputParameters?.length > 0 || editingNode?.actionType === 'RuleEvaluationAction') ? 'max-w-4xl' : 'max-w-2xl'} max-h-[85vh] overflow-y-auto`}>
                         <DialogHeader>
                             <DialogTitle>Edit Action Node</DialogTitle>
                             <DialogDescription>
@@ -1324,7 +1324,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             {/* Rule Edit Dialog */}
             {isEditDialogOpen && editingNode && editingNodeType === 'rule' && (
                 <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                    <DialogContent className="max-w-md">
+                    <DialogContent className="max-w-2xl">
                         <DialogHeader>
                             <DialogTitle>Edit Rule Node</DialogTitle>
                             <DialogDescription>

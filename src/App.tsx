@@ -2092,7 +2092,7 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+            <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>
                         Edit {editingNodeType === 'rule' ? 'Rule' : 'Action'} Node
@@ -4566,7 +4566,7 @@ function App() {
 
     return (
         <div className="min-h-screen bg-background text-foreground">
-            <div className={`container mx-auto p-6 ${isChainViewVisible ? 'space-y-3' : 'space-y-6'}`}>
+            <div className={isChainViewVisible ? 'w-full px-4 py-3 space-y-3' : 'container mx-auto p-6 space-y-6'}>
                 {/* Header */}
                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -4880,8 +4880,8 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                 {/* Main Content - Full chain map when visible, otherwise rule editor */}
                 {isChainViewVisible ? (
                     /* Full-width Interactive Chain Map */
-                    <div className="h-[calc(100vh-200px)]">
-                        <div className="flex flex-col h-full overflow-hidden bg-background border border-border rounded-lg">
+                    <div className="h-[calc(100vh-200px)] w-full">
+                        <div className="flex flex-col h-full w-full overflow-hidden bg-background border border-border rounded-lg">
                             {/* Streamlined Chain Map Header */}
                             <div className="p-2 border-b border-border bg-card/50 flex-shrink-0">
                                 <div className="flex items-center justify-center">
@@ -4963,7 +4963,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                             </div>
                             
                             {/* Interactive Chain Map Content */}
-                            <div className="flex-grow overflow-hidden relative">
+                            <div className="flex-grow w-full overflow-hidden relative">
                                 {chainError && (
                                     <div className="absolute inset-0 flex items-center justify-center p-4 bg-destructive/80 z-10">
                                         <p className="text-destructive-foreground text-center">{chainError}</p>
