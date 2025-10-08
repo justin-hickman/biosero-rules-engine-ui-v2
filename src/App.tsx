@@ -1292,18 +1292,20 @@ const RuleNode = ({ data, selected }: { data: any; selected?: boolean }) => {
                 </div>
             </div>
             
-            <div style={{ position: 'absolute', right: '6px', top: '6px', zIndex: 30 }}>
+            {/* Delete button for nodes */}
+            <div style={{ position: 'absolute', right: '4px', top: '4px', zIndex: 50 }}>
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        data?.onDelete?.();
+                        // Use appropriate deletion logic for each node type
+                        data?.onDelete?.() || onDelete?.(); 
                     }}
                     title="Delete node"
                     className="
-                        size-3 p-0 rounded-full text-gray-400 text-xs 
+                        size-3 p-0 rounded-full text-gray-400 text-xs font-bold
                         flex items-center justify-center bg-transparent
                         hover:bg-red-500/30 hover:text-red-300
-                        transition-all duration-150 focus:outline-none
+                        transition-all duration-150 focus:outline-none border border-transparent hover:border-red-500/50
                     "
                 >
                     ×
@@ -1396,18 +1398,20 @@ const ActionNode = ({ data, selected }: { data: any; selected?: boolean }) => {
                 </div>
             </div>
             
-            <div style={{ position: 'absolute', right: '6px', top: '6px', zIndex: 30 }}>
+            {/* Delete button for nodes */}
+            <div style={{ position: 'absolute', right: '4px', top: '4px', zIndex: 50 }}>
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        data?.onDelete?.();
+                        // Use appropriate deletion logic for each node type
+                        data?.onDelete?.() || onDelete?.(); 
                     }}
                     title="Delete node"
                     className="
-                        size-3 p-0 rounded-full text-gray-400 text-xs 
+                        size-3 p-0 rounded-full text-gray-400 text-xs font-bold
                         flex items-center justify-center bg-transparent
                         hover:bg-red-500/30 hover:text-red-300
-                        transition-all duration-150 focus:outline-none
+                        transition-all duration-150 focus:outline-none border border-transparent hover:border-red-500/50
                     "
                 >
                     ×
@@ -1474,12 +1478,12 @@ const ErrorNode = ({ data, selected }: { data: any; selected?: boolean }) => {
                 style={{
                     top: '50%',
                     transform: 'translateY(-50%)',
-                    width: 12,
-                    height: 12,
+                    width: 16,
+                    height: 16,
                     borderRadius: '50%',
                     background: '#22c55e',
                     border: '1px solid #16a34a',
-                    left: -6,
+                    left: -8,
                     zIndex: 20
                 }}
             />
@@ -1492,15 +1496,16 @@ const ErrorNode = ({ data, selected }: { data: any; selected?: boolean }) => {
                 {message && <div className="text-xs text-red-300 mt-1 truncate" title={message}>{message}</div>}
             </div>
 
-            <div style={{ position: 'absolute', right: '6px', top: '6px', zIndex: 40 }}>
+            {/* Delete button for nodes */}
+            <div style={{ position: 'absolute', right: '4px', top: '4px', zIndex: 50 }}>
                 <button
-                    onClick={(e) => { e.stopPropagation(); onDelete?.(); }}
+                    onClick={(e) => { e.stopPropagation(); data?.onDelete?.() || onDelete?.(); }}
                     title="Delete node"
                     className="
-                        size-3 p-0 rounded-full text-gray-400 text-xs 
+                        size-3 p-0 rounded-full text-gray-400 text-xs font-bold
                         flex items-center justify-center bg-transparent
                         hover:bg-red-500/30 hover:text-red-300
-                        transition-all duration-150 focus:outline-none
+                        transition-all duration-150 focus:outline-none border border-transparent hover:border-red-500/50
                     "
                 >
                     ×
