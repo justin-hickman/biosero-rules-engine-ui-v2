@@ -1,285 +1,354 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { cn } from '../lib/utils';
 import { 
-    MagnifyingGlass, 
-    Circle, 
+    Search, 
+    RotateCcw, 
+    Loader2, 
+    ChevronDown, 
+    ChevronRight,
+    Clock,
     CheckCircle, 
     XCircle, 
-    Pause,
-    Clock,
-    SpinnerGap,
-    CaretDown,
-    CaretRight,
-    Flask,
-    Package,
-    Hash,
-    GitBranch,
-    ArrowClockwise,
-    WarningCircle
-} from '@phosphor-icons/react';
-import { WorkflowContext, ContextStatus, RulesEngineService } from '../services/RulesEngineService';
+    AlertCircle
+} from 'lucide-react';
+import { RulesEngineService, WorkflowContext, ContextStatus } from '../services/RulesEngineService';
 
 interface SampleListProps {
     rulesEngineUrl: string;
     selectedSampleId?: string;
     onSampleSelect: (sample: WorkflowContext) => void;
     refreshInterval?: number;
+    onAutoRefreshChange?: (isAutoRefresh: boolean) => void;
 }
 
 export function SampleList({
     rulesEngineUrl,
     selectedSampleId,
     onSampleSelect,
-    refreshInterval = 2000
+    refreshInterval = 3000,
+    onAutoRefreshChange
 }: SampleListProps) {
+    
     const [samples, setSamples] = useState<WorkflowContext[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'complete' | 'failed'>('all');
-    const [dateFilter, setDateFilter] = useState<number | null>(null); // null = all time, or number of days
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [isAutoRefresh, setIsAutoRefresh] = useState(false); // Default to off for better performance
-    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['active']));
+    const [dateFilter, setDateFilter] = useState<number | null>(null);
+    const [isAutoRefresh, setIsAutoRefresh] = useState(true);
+    
+    // Notify parent of auto-refresh state changes
+    useEffect(() => {
+        onAutoRefreshChange?.(isAutoRefresh);
+    }, [isAutoRefresh, onAutoRefreshChange]);
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['active', 'complete', 'failed']));
+    const lastFetchTime = useRef<number>(0);
+    const isFetching = useRef<boolean>(false);
 
     const rulesEngineService = React.useMemo(
         () => new RulesEngineService(rulesEngineUrl),
         [rulesEngineUrl]
     );
 
-    // Fetch samples
+    // Fetch samples with proper state management
     const fetchSamples = useCallback(async () => {
+        // Prevent rapid successive calls
+        const now = Date.now();
+        if (isFetching.current || (now - lastFetchTime.current < 1000)) {
+            console.log('📊 Monitor: Skipping fetch - too soon or already fetching');
+            return;
+        }
+        
+        isFetching.current = true;
+        lastFetchTime.current = now;
+        
         try {
-            const response = await rulesEngineService.getChainsAsSamples({
-                lastNDays: dateFilter || undefined,
-                pageSize: 500 // Get more samples
+            console.log('🔍 Monitor: Fetching samples from BRE API...', {
+                rulesEngineUrl,
+                dateFilter,
+                filterStatus,
+                timestamp: new Date().toISOString()
             });
             
-            if (response.samples && Array.isArray(response.samples)) {
-                setSamples(response.samples);
+            setIsLoading(true);
+            setError(null);
+            
+            // Use the new rich payload structure from /contexts/rulechains
+            let apiParams: any = {
+                page: 1,
+                pageSize: 50,
+                isActive: true
+            };
+            
+            if (dateFilter) {
+                const endDate = new Date();
+                const startDate = new Date();
+                startDate.setDate(startDate.getDate() - dateFilter);
+                apiParams.startTimestamp = startDate.toISOString();
+                apiParams.endTimestamp = endDate.toISOString();
+            }
+            
+            console.log('📊 Monitor: Using new rich payload API call:', apiParams);
+            
+            // Get the rich payload structure
+            let response = await rulesEngineService.getChainContexts(apiParams);
+            
+            // Fallback if no active chains
+            if (!response.success || !response.items || response.items.length === 0) {
+                console.log('📊 Monitor: No active chains found, trying all chains...');
+                const fallbackParams = { ...apiParams };
+                delete fallbackParams.isActive;
+                response = await rulesEngineService.getChainContexts(fallbackParams);
+                console.log('📊 Monitor: Fallback query result:', {
+                    success: response.success,
+                    total: response.total,
+                    itemCount: response.items?.length || 0
+                });
+            }
+            
+            if (response.success && response.items && response.items.length > 0) {
+                // Convert rich payload to samples
+                const newSamples = response.items.map(chain => {
+                    // Extract sample info from the rich payload
+                    const sampleId = chain.variables?.SampleId || chain.variables?.OrderId || `Sample ${chain.chainId.slice(-4)}`;
+                    const status = chain.isComplete ? 
+                        (chain.status === 'Failed' ? 3 : 2) : // Failed or Complete
+                        (chain.isActive ? 1 : 0); // Active or Ready
+                    
+                    return {
+                        contextId: chain.chainId,
+                        sampleId: sampleId,
+                        status: status as ContextStatus,
+                        lastUpdatedAt: chain.startTimestamp,
+                        createdAt: chain.startTimestamp, // Add required createdAt property
+                        chainId: chain.chainId,
+                        // Add rich metadata
+                        chainStatus: chain.status,
+                        isActive: chain.isActive,
+                        isComplete: chain.isComplete,
+                        progress: chain.progress,
+                        performanceMetrics: chain.performanceMetrics,
+                        variables: chain.variables
+                    } as WorkflowContext & {
+                        chainStatus: string;
+                        isActive: boolean;
+                        isComplete: boolean;
+                        progress?: any;
+                        performanceMetrics?: any;
+                        variables?: Record<string, any>;
+                    };
+                });
+                
+                console.log('✅ Monitor: Converted rich payload to samples:', {
+                    count: newSamples.length,
+                    sampleIds: newSamples.map(s => s.sampleId)
+                });
+                
+                // Create a stable comparison key for each sample
+                const createSampleKey = (sample: WorkflowContext) => 
+                    `${sample.sampleId}-${sample.status}-${sample.lastUpdatedAt}-${sample.chainId || 'no-chain'}`;
+                
+                setSamples(prevSamples => {
+                    // Quick length check first
+                    if (prevSamples.length !== newSamples.length) {
+                        console.log('✅ Monitor: Sample count changed:', {
+                            prev: prevSamples.length,
+                            new: newSamples.length
+                        });
+                        return newSamples;
+                    }
+                    
+                    // Create comparison keys
+                    const prevKeys = prevSamples.map(createSampleKey).sort();
+                    const newKeys = newSamples.map(createSampleKey).sort();
+                    
+                    // Check if any keys are different
+                    const hasChanged = prevKeys.some((key, index) => key !== newKeys[index]);
+                    
+                    if (hasChanged) {
+                        console.log('✅ Monitor: Sample data changed');
+                        return newSamples;
+                    } else {
+                        console.log('📊 Monitor: No changes detected, keeping existing samples');
+                        return prevSamples;
+                    }
+                });
             } else {
                 setSamples([]);
+                console.log('⚠️ Monitor: No samples found in database');
             }
             setError(null);
         } catch (err: any) {
-            const errorMessage = err.message || 'Failed to fetch samples';
-            setError(errorMessage);
+            console.error('❌ Monitor: Failed to fetch samples:', {
+                error: err.message,
+                rulesEngineUrl,
+                stack: err.stack
+            });
             
-            // Don't stop auto-refresh on error - it might recover
-            if (errorMessage.includes('Failed to fetch')) {
+            const errorMessage = err.message || 'Failed to fetch samples';
+            
+            if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+                setError('Backend error: The /contexts/rulechains endpoint may not be fully implemented yet. Please contact your administrator to implement the monitoring API endpoints.');
+            } else if (errorMessage.includes('Failed to fetch')) {
                 setError('Cannot connect to Rules Engine. Please check the URL and ensure the service is running.');
+            } else if (errorMessage.includes('400')) {
+                setError('Invalid request parameters. Please check your filter settings.');
+            } else {
+                setError(`API Error: ${errorMessage}`);
             }
         } finally {
             setIsLoading(false);
+            isFetching.current = false;
         }
-    }, [rulesEngineService, dateFilter]);
+    }, [rulesEngineService, dateFilter, filterStatus, rulesEngineUrl]);
 
-    // Initial fetch and polling setup
+    // Auto-refresh setup
     useEffect(() => {
-        // Initial fetch
-        fetchSamples();
-
-        // Set up interval if auto-refresh is enabled
-        let interval: NodeJS.Timeout | null = null;
+        // Only fetch samples initially, not on every effect run
         if (isAutoRefresh) {
-            interval = setInterval(fetchSamples, refreshInterval);
+        fetchSamples();
         }
 
-        // Cleanup
+        let interval: number | null = null;
+        if (isAutoRefresh) {
+            interval = setInterval(() => {
+                fetchSamples();
+            }, refreshInterval);
+        }
+
         return () => {
             if (interval) {
                 clearInterval(interval);
             }
         };
-    }, [isAutoRefresh, refreshInterval, dateFilter]); // Remove fetchSamples from deps to prevent loops
+    }, [isAutoRefresh, refreshInterval, dateFilter]);
 
-    // Group samples by status
+    // Group samples by status with proper filtering and stable references
     const groupedSamples = useMemo(() => {
-        let filtered = samples;
+        // Create a stable key for the current filter state
+        const filterKey = `${filterStatus}-${searchTerm}-${samples.length}`;
 
-        // Apply status filter
+        const filtered = samples.filter(sample => {
+            // Status filter
         if (filterStatus !== 'all') {
-            filtered = filtered.filter(sample => {
-                switch (filterStatus) {
-                    case 'active':
-                        return sample.status === ContextStatus.Active || 
-                               sample.status === ContextStatus.Running;
-                    case 'complete':
-                        return sample.status === ContextStatus.Complete;
-                    case 'failed':
-                        return sample.status === ContextStatus.Failed;
-                    default:
-                        return true;
+                if (filterStatus === 'active' && sample.status !== ContextStatus.Active && sample.status !== ContextStatus.Running) {
+                    return false;
+                }
+                if (filterStatus === 'complete' && sample.status !== ContextStatus.Complete) {
+                    return false;
+                }
+                if (filterStatus === 'failed' && sample.status !== ContextStatus.Failed) {
+                    return false;
+                }
+            }
+
+            // Search filter
+        if (searchTerm) {
+            const searchLower = searchTerm.toLowerCase();
+                return (
+                sample.sampleId?.toLowerCase().includes(searchLower) ||
+                    sample.workflowContextId?.toLowerCase().includes(searchLower) ||
+                    sample.chainId?.toLowerCase().includes(searchLower)
+                );
+            }
+
+            return true;
+        });
+
+        const result = {
+            active: filtered.filter(s => s.status === ContextStatus.Active || s.status === ContextStatus.Running),
+            complete: filtered.filter(s => s.status === ContextStatus.Complete),
+            failed: filtered.filter(s => s.status === ContextStatus.Failed)
+        };
+
+        // Only log when there are actual changes
+        if (filtered.length > 0) {
+            console.log('📊 Monitor: Grouped samples:', {
+                filterKey,
+                total: samples.length,
+                filtered: filtered.length,
+                groups: {
+                    active: result.active.length,
+                    complete: result.complete.length,
+                    failed: result.failed.length
                 }
             });
         }
 
-        // Apply search filter
-        if (searchTerm) {
-            const searchLower = searchTerm.toLowerCase();
-            filtered = filtered.filter(sample => 
-                sample.sampleId?.toLowerCase().includes(searchLower) ||
-                sample.orderId?.toLowerCase().includes(searchLower) ||
-                sample.batchId?.toLowerCase().includes(searchLower) ||
-                sample.contextId.toLowerCase().includes(searchLower)
-            );
-        }
+        return result;
+    }, [samples, filterStatus, searchTerm]);
 
-        // Group by status
-        const groups = {
-            active: [] as WorkflowContext[],
-            complete: [] as WorkflowContext[],
-            failed: [] as WorkflowContext[]
-        };
-
-        filtered.forEach(sample => {
-            // Convert status to number if it's a string
-            const status = typeof sample.status === 'string' ? parseInt(sample.status) : sample.status;
-            
-            if (status === ContextStatus.Active || status === ContextStatus.Running) {
-                groups.active.push(sample);
-            } else if (status === ContextStatus.Complete) {
-                groups.complete.push(sample);
-            } else if (status === ContextStatus.Failed) {
-                groups.failed.push(sample);
-            } else {
-                // Handle unknown status - add to active for visibility
-                groups.active.push(sample);
-            }
-        });
-
-        // Sort each group by last updated
-        Object.values(groups).forEach(group => {
-            group.sort((a, b) => 
-                new Date(b.lastUpdatedAt).getTime() - new Date(a.lastUpdatedAt).getTime()
-            );
-        });
-
-        return groups;
-    }, [samples, searchTerm, filterStatus]);
-
-    const getStatusIcon = (status: ContextStatus) => {
-        const info = rulesEngineService.getStatusInfo(status);
-        switch (info.icon) {
-            case 'SpinnerGap':
-                return <SpinnerGap className="w-4 h-4 animate-spin" />;
-            case 'CheckCircle':
-                return <CheckCircle className="w-4 h-4" weight="fill" />;
-            case 'XCircle':
-                return <XCircle className="w-4 h-4" weight="fill" />;
-            case 'Pause':
-                return <Pause className="w-4 h-4" weight="fill" />;
-            case 'Circle':
-            default:
-                return <Circle className="w-4 h-4" />;
-        }
-    };
-
-    const toggleGroup = (group: string) => {
-        const newExpanded = new Set(expandedGroups);
-        if (newExpanded.has(group)) {
-            newExpanded.delete(group);
+    // Toggle group expansion
+    const toggleGroup = useCallback((group: string) => {
+        setExpandedGroups(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(group)) {
+                newSet.delete(group);
         } else {
-            newExpanded.add(group);
-        }
-        setExpandedGroups(newExpanded);
-    };
+                newSet.add(group);
+            }
+            return newSet;
+        });
+    }, []);
 
-    const renderSampleCard = (sample: WorkflowContext) => {
-        const variables = rulesEngineService.extractVariables(sample);
+    // Render sample card with stable key and memoization
+    const renderSampleCard = useCallback((sample: WorkflowContext) => {
+        const isSelected = selectedSampleId === sample.sampleId;
         
-        // Convert status to number if it's a string
-        const status = typeof sample.status === 'string' ? parseInt(sample.status) : sample.status;
-        const statusInfo = rulesEngineService.getStatusInfo(status);
-        
-        // Extract key information
-        const workflowName = variables.workflowName || variables.WorkflowName;
-        const currentRule = variables.currentRule || variables.CurrentRule || variables.currentRuleName;
+        // Better status icons
+        const statusIcon = sample.status === ContextStatus.Complete ? (
+            <CheckCircle className="w-4 h-4 text-green-500" />
+        ) : sample.status === ContextStatus.Failed ? (
+            <XCircle className="w-4 h-4 text-red-500" />
+        ) : sample.status === ContextStatus.Active ? (
+            <Clock className="w-4 h-4 text-blue-500" />
+        ) : sample.status === ContextStatus.Running ? (
+            <Loader2 className="w-4 h-4 text-orange-500 animate-spin" />
+        ) : (
+            <Clock className="w-4 h-4 text-gray-500" />
+        );
+
+        // Create a stable key that won't change unless the sample actually changes
+        const stableKey = `${sample.sampleId}-${sample.status}-${sample.chainId || 'no-chain'}`;
         
         return (
             <Card
-                key={sample.contextId}
-                onClick={() => onSampleSelect(sample)}
+                key={stableKey}
                 className={cn(
-                    "p-3 cursor-pointer transition-all hover:shadow-md",
-                    selectedSampleId === sample.contextId && "border-primary bg-accent/50",
-                    status === ContextStatus.Running && "border-yellow-500/50"
+                    "p-3 cursor-pointer transition-all duration-200 hover:shadow-md mb-2",
+                    isSelected ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-800"
                 )}
+                onClick={() => onSampleSelect(sample)}
             >
-                <div className="space-y-2">
-                    {/* Header */}
-                    <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                            {getStatusIcon(status)}
-                            <span className="font-medium text-sm truncate">
-                                {rulesEngineService.getContextDisplayName(sample)}
-                            </span>
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        {statusIcon}
+                        <div>
+                            <div className="font-medium text-sm">{sample.sampleId}</div>
+                            <div className="text-xs text-muted-foreground">
+                                {sample.workflowContextId}
                         </div>
-                        <Badge 
-                            variant={
-                                status === ContextStatus.Complete ? "secondary" :
-                                status === ContextStatus.Failed ? "destructive" :
-                                status === ContextStatus.Running ? "default" :
-                                "outline"
-                            }
-                            className="text-xs flex-shrink-0"
-                        >
-                            {statusInfo.label}
-                        </Badge>
                     </div>
-
-                    {/* Workflow & Rule Info */}
-                    {(workflowName || currentRule) && (
-                        <div className="space-y-1">
-                            {workflowName && (
-                                <div className="text-xs text-muted-foreground truncate">
-                                    {workflowName}
                                 </div>
-                            )}
-                            {currentRule && (
-                                <div className="flex items-center gap-1">
-                                    <GitBranch className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                                    <span className="text-xs font-medium truncate">{currentRule}</span>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Metadata & Timing */}
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <div className="flex items-center gap-3">
-                            {sample.orderId && (
-                                <div className="flex items-center gap-1">
-                                    <Hash className="w-3 h-3" />
-                                    <span className="truncate max-w-[80px]">{sample.orderId}</span>
-                                </div>
-                            )}
-                            {sample.batchId && (
-                                <div className="flex items-center gap-1">
-                                    <Package className="w-3 h-3" />
-                                    <span className="truncate max-w-[80px]">{sample.batchId}</span>
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
+                    <div className="text-right">
+                        <div className="text-xs text-muted-foreground">
                             <span>{rulesEngineService.formatDuration(sample.createdAt, sample.lastUpdatedAt)}</span>
                         </div>
                     </div>
                 </div>
             </Card>
         );
-    };
+    }, [selectedSampleId, onSampleSelect, rulesEngineService]);
 
     const totalCount = groupedSamples.active.length + groupedSamples.complete.length + groupedSamples.failed.length;
 
     return (
-        <div className="flex flex-col h-full bg-background overflow-hidden">
+        <div className="flex flex-col h-full bg-background">
             {/* Header */}
             <div className="pl-8 pr-6 py-4 border-b space-y-3 flex-shrink-0">
                 <div className="flex items-center justify-between">
@@ -297,7 +366,7 @@ export function SampleList({
                             disabled={isLoading}
                             title="Refresh samples"
                         >
-                            <ArrowClockwise className={cn("w-4 h-4", isLoading && "animate-spin")} />
+                            <RotateCcw className={cn("w-4 h-4", isLoading && "animate-spin")} />
                         </Button>
                         <Button
                             onClick={() => setIsAutoRefresh(!isAutoRefresh)}
@@ -307,16 +376,17 @@ export function SampleList({
                                 "gap-2",
                                 isAutoRefresh && "text-primary"
                             )}
+                            title={isAutoRefresh ? "Auto-refresh is enabled" : "Auto-refresh is disabled"}
                         >
-                            <SpinnerGap className={cn("w-4 h-4", isAutoRefresh && "animate-pulse")} />
-                            {isAutoRefresh ? "Live" : "Paused"}
+                            <Loader2 className={cn("w-4 h-4", isAutoRefresh && "animate-pulse")} />
+                            {isAutoRefresh ? "Auto-refresh ON" : "Auto-refresh OFF"}
                         </Button>
                     </div>
                 </div>
 
                 {/* Search */}
                 <div className="relative">
-                    <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
                     <Input
                         placeholder="Search samples..."
                         value={searchTerm}
@@ -325,138 +395,85 @@ export function SampleList({
                     />
                 </div>
 
-                {/* Quick Filters */}
-                <div className="space-y-2">
-                    {/* Status Filters */}
-                    <div className="flex gap-1">
+                {/* Filters */}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1">
                         <Button
                             variant={filterStatus === 'all' ? 'default' : 'outline'}
                             size="sm"
                             onClick={() => setFilterStatus('all')}
-                            className="flex-1 text-xs"
+                            className="text-xs"
                         >
-                            All ({samples.length})
+                            All
                         </Button>
                         <Button
                             variant={filterStatus === 'active' ? 'default' : 'outline'}
                             size="sm"
                             onClick={() => setFilterStatus('active')}
-                            className="flex-1 text-xs"
+                            className="text-xs"
                         >
                             Active
                         </Button>
                         <Button
-                            variant={filterStatus === 'complete' ? 'secondary' : 'outline'}
+                            variant={filterStatus === 'complete' ? 'default' : 'outline'}
                             size="sm"
                             onClick={() => setFilterStatus('complete')}
-                            className="flex-1 text-xs"
+                            className="text-xs"
                         >
                             Complete
                         </Button>
                         <Button
-                            variant={filterStatus === 'failed' ? 'destructive' : 'outline'}
+                            variant={filterStatus === 'failed' ? 'default' : 'outline'}
                             size="sm"
                             onClick={() => setFilterStatus('failed')}
-                            className="flex-1 text-xs"
+                            className="text-xs"
                         >
                             Failed
                         </Button>
                     </div>
                     
-                    {/* Date Filters */}
-                    <div className="flex gap-1">
-                        <Button
-                            variant={dateFilter === null ? 'default' : 'outline'}
-                            size="sm"
-                            onClick={() => setDateFilter(null)}
-                            className="flex-1 text-xs"
-                        >
-                            All Time
-                        </Button>
+                    <div className="flex items-center gap-1">
                         <Button
                             variant={dateFilter === 1 ? 'default' : 'outline'}
                             size="sm"
                             onClick={() => setDateFilter(1)}
-                            className="flex-1 text-xs"
+                            className="text-xs"
                         >
-                            Today
+                            Last 24h
                         </Button>
                         <Button
                             variant={dateFilter === 7 ? 'default' : 'outline'}
                             size="sm"
                             onClick={() => setDateFilter(7)}
-                            className="flex-1 text-xs"
+                            className="text-xs"
                         >
-                            7 Days
+                            Last 7d
                         </Button>
                         <Button
                             variant={dateFilter === 30 ? 'default' : 'outline'}
                             size="sm"
                             onClick={() => setDateFilter(30)}
-                            className="flex-1 text-xs"
+                            className="text-xs"
                         >
-                            30 Days
-                        </Button>
+                            Last 30d
+                                </Button>
+                        {dateFilter && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setDateFilter(null)}
+                                className="text-xs"
+                            >
+                                Clear
+                            </Button>
+                        )}
                     </div>
                 </div>
             </div>
 
-            {/* Sample List */}
-            <ScrollArea className="flex-1">
-                {isLoading && !error && samples.length === 0 && (
-                    <div className="px-8 py-8 text-center">
-                        <SpinnerGap className="w-8 h-8 animate-spin mx-auto mb-3 text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">Loading samples...</p>
-                    </div>
-                )}
-
-                {error && (
-                    <div className="pl-8 pr-6 py-4">
-                        <Card className="border-destructive/50 bg-destructive/10">
-                            <div className="p-4 space-y-2">
-                                <div className="flex items-center gap-2 text-destructive">
-                                    <WarningCircle className="w-5 h-5" />
-                                    <p className="font-medium text-sm">Connection Error</p>
-                                </div>
-                                <p className="text-xs text-muted-foreground">{error}</p>
-                                <Button
-                                    onClick={fetchSamples}
-                                    variant="outline"
-                                    size="sm"
-                                    className="w-full"
-                                >
-                                    Retry Connection
-                                </Button>
-                            </div>
-                        </Card>
-                    </div>
-                )}
-
-                {!isLoading && !error && totalCount === 0 && (
-                    <div className="px-8 py-8 text-center">
-                        <div className="mb-4">
-                            <Flask className="w-12 h-12 mx-auto text-muted-foreground/50" />
-                        </div>
-                        <p className="font-medium mb-1">No samples found</p>
-                        <p className="text-sm text-muted-foreground">
-                            {searchTerm ? 'Try adjusting your search criteria' : 
-                             dateFilter ? `No samples in the last ${dateFilter} day${dateFilter > 1 ? 's' : ''}` : 
-                             'No samples are currently running'}
-                        </p>
-                        {dateFilter && (
-                            <Button
-                                variant="link"
-                                size="sm"
-                                onClick={() => setDateFilter(null)}
-                                className="mt-2"
-                            >
-                                Show all time
-                            </Button>
-                        )}
-                    </div>
-                )}
-
+            {/* Content with ScrollArea */}
                 {!isLoading && !error && totalCount > 0 && (
+                <ScrollArea className="flex-1">
                     <div className="pl-8 pr-6 py-4 space-y-4">
                         {/* Active/Running Group */}
                         {groupedSamples.active.length > 0 && (
@@ -466,9 +483,9 @@ export function SampleList({
                                     onClick={() => toggleGroup('active')}
                                 >
                                     {expandedGroups.has('active') ? (
-                                        <CaretDown className="w-4 h-4 text-muted-foreground" />
+                                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
                                     ) : (
-                                        <CaretRight className="w-4 h-4 text-muted-foreground" />
+                                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
                                     )}
                                     <h3 className="font-medium text-sm">
                                         Active & Running
@@ -493,11 +510,11 @@ export function SampleList({
                                     onClick={() => toggleGroup('complete')}
                                 >
                                     {expandedGroups.has('complete') ? (
-                                        <CaretDown className="w-4 h-4 text-muted-foreground" />
+                                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
                                     ) : (
-                                        <CaretRight className="w-4 h-4 text-muted-foreground" />
+                                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
                                     )}
-                                    <h3 className="font-medium text-sm text-green-600 dark:text-green-400">
+                                    <h3 className="font-medium text-sm">
                                         Complete
                                     </h3>
                                     <Badge variant="secondary" className="text-xs">
@@ -520,11 +537,11 @@ export function SampleList({
                                     onClick={() => toggleGroup('failed')}
                                 >
                                     {expandedGroups.has('failed') ? (
-                                        <CaretDown className="w-4 h-4 text-muted-foreground" />
+                                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
                                     ) : (
-                                        <CaretRight className="w-4 h-4 text-muted-foreground" />
+                                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
                                     )}
-                                    <h3 className="font-medium text-sm text-red-600 dark:text-red-400">
+                                    <h3 className="font-medium text-sm">
                                         Failed
                                     </h3>
                                     <Badge variant="destructive" className="text-xs">
@@ -539,8 +556,49 @@ export function SampleList({
                             </div>
                         )}
                     </div>
+                </ScrollArea>
+            )}
+
+            {/* Loading State */}
+            {isLoading && (
+                <div className="flex-1 flex items-center justify-center">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading samples...
+                    </div>
+                </div>
+            )}
+
+            {/* Error State */}
+            {error && (
+                <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                        <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-2" />
+                        <div className="text-red-500 mb-2">Error</div>
+                        <div className="text-sm text-muted-foreground max-w-md">{error}</div>
+                        <Button 
+                            onClick={fetchSamples} 
+                            variant="outline" 
+                            size="sm" 
+                            className="mt-2"
+                        >
+                            Try Again
+                        </Button>
+                    </div>
+                </div>
+            )}
+
+            {/* Empty State */}
+            {!isLoading && !error && totalCount === 0 && (
+                <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="text-muted-foreground mb-2">No samples found</div>
+                        <div className="text-sm text-muted-foreground">
+                            {searchTerm ? 'Try adjusting your search terms' : 'No samples match your current filters'}
+                        </div>
+                    </div>
+                    </div>
                 )}
-            </ScrollArea>
         </div>
     );
 }

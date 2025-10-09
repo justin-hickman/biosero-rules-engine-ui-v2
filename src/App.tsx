@@ -4221,8 +4221,13 @@ function App() {
         // Find all edges from the current rule
         const outgoingEdges = chainData.edges.filter(edge => edge.from === ruleId);
         
+        console.log(`=== CONVERTING CHAIN DATA TO ACTIONS FOR RULE ${ruleId} ===`);
+        console.log('Outgoing edges:', outgoingEdges.map(edge => `${edge.from} -> ${edge.to} (${edge.type})`));
+        
         outgoingEdges.forEach(edge => {
             const targetNode = chainData.nodes[edge.to];
+            console.log(`Processing edge: ${edge.from} -> ${edge.to} (${edge.type})`);
+            console.log('Target node:', targetNode);
             if (!targetNode) return;
             
             // Check if target is an action node
@@ -4277,6 +4282,11 @@ function App() {
                 }
             }
         });
+        
+        console.log(`Final actions for rule ${ruleId}:`);
+        console.log('OnSuccess actions:', onSuccessActions.length, onSuccessActions);
+        console.log('OnFailure actions:', onFailureActions.length, onFailureActions);
+        console.log(`=== END CONVERSION FOR RULE ${ruleId} ===`);
         
         return { onSuccess: onSuccessActions, onFailure: onFailureActions };
     };
@@ -4736,10 +4746,14 @@ function App() {
             const currentRule = forceFreshData ? undefined : (jsonData || undefined);
             const graph = await buildRuleChainRecursively(startRuleId, dataServicesRootURI, currentRule, forceFreshData);
             console.log('Generated recursive chain with', Object.keys(graph.nodes).length, 'nodes and', graph.edges.length, 'edges');
+            console.log('Chain nodes:', Object.keys(graph.nodes));
+            console.log('Chain edges:', graph.edges.map(edge => `${edge.from} -> ${edge.to} (${edge.type})`));
             
             // Clean up the chain data to remove timestamp-based IDs
             const cleanedGraph = cleanupChainData(graph);
             console.log('Cleaned chain data:', Object.keys(cleanedGraph.nodes).length, 'nodes and', cleanedGraph.edges.length, 'edges');
+            console.log('Cleaned nodes:', Object.keys(cleanedGraph.nodes));
+            console.log('Cleaned edges:', cleanedGraph.edges.map(edge => `${edge.from} -> ${edge.to} (${edge.type})`));
             
             setRuleChainData(cleanedGraph);
             setIsChainViewVisible(true);
@@ -4963,17 +4977,17 @@ function App() {
                     let isExistingRule = false;
                     
                     if (node.ruleId) {
-                        try {
+                    try {
                             ruleData = await apiFetchRuleDetails(dataServicesRootURI, node.ruleId);
                             isExistingRule = true;
-                        } catch (fetchError: any) {
+                    } catch (fetchError: any) {
                             // If rule doesn't exist (404), create a new one
-                            if (fetchError.message?.includes('404') || fetchError.message?.includes('not found')) {
+                        if (fetchError.message?.includes('404') || fetchError.message?.includes('not found')) {
                                 console.log(`Creating new rule ${node.ruleId} as it doesn't exist in data services`);
                                 ruleData = null;
                             } else {
-                                throw fetchError;
-                            }
+                        throw fetchError;
+                    }
                         }
                     } else {
                         // New rule without ruleId - will be created
@@ -4987,31 +5001,41 @@ function App() {
                     if (isExistingRule && ruleData) {
                         // Update existing rule with chain data
                         ruleToSave = {
-                            ...ruleData,
+                        ...ruleData,
                             // Update the rule name if we have a label from the node
                             name: node.label && node.label.trim() !== '' ? node.label.trim() : ruleData.name,
                             // Update the rule description if we have one from the node
                             description: node.description && node.description.trim() !== '' ? node.description.trim() : ruleData.description,
-                            properties: ruleData.properties.map(prop => {
-                                if (prop.name === "OnSuccess") {
-                                    return {
-                                        ...prop,
-                                        value: JSON.stringify({ Actions: onSuccess })
-                                    };
-                                } else if (prop.name === "OnFailure") {
-                                    return {
-                                        ...prop,
-                                        value: JSON.stringify({ Actions: onFailure })
+                        properties: ruleData.properties.map(prop => {
+                            if (prop.name === "OnSuccess") {
+                                    // Remove _uid field but keep all other fields for rule engine compatibility
+                                    const cleanOnSuccess = onSuccess.map(action => {
+                                        const { _uid, ...cleanAction } = action;
+                                        return cleanAction;
+                                    });
+                                return {
+                                    ...prop,
+                                        value: JSON.stringify({ Actions: cleanOnSuccess })
+                                };
+                            } else if (prop.name === "OnFailure") {
+                                    // Remove _uid field but keep all other fields for rule engine compatibility
+                                    const cleanOnFailure = onFailure.map(action => {
+                                        const { _uid, ...cleanAction } = action;
+                                        return cleanAction;
+                                    });
+                                return {
+                                    ...prop,
+                                        value: JSON.stringify({ Actions: cleanOnFailure })
                                     };
                                 } else if (prop.name === "Expression") {
                                     return {
                                         ...prop,
                                         value: node.expression && node.expression.trim() !== '' ? node.expression.trim() : prop.value
-                                    };
-                                }
-                                return prop;
-                            })
-                        };
+                                };
+                            }
+                            return prop;
+                        })
+                    };
                         console.log(`=== UPDATING EXISTING RULE ${ruleIdToUse} ===`);
                         console.log('Original rule data:', JSON.stringify(ruleData, null, 2));
                         console.log('Updated rule data:', JSON.stringify(ruleToSave, null, 2));
@@ -5054,14 +5078,20 @@ function App() {
                                 {
                                     name: "OnSuccess",
                                     value: JSON.stringify({
-                                        Actions: onSuccess
+                                        Actions: onSuccess.map(action => {
+                                            const { _uid, ...cleanAction } = action;
+                                            return cleanAction;
+                                        })
                                     }),
                                     valueType: "String"
                                 },
                                 {
                                     name: "OnFailure",
                                     value: JSON.stringify({
-                                        Actions: onFailure
+                                        Actions: onFailure.map(action => {
+                                            const { _uid, ...cleanAction } = action;
+                                            return cleanAction;
+                                        })
                                     }),
                                     valueType: "String"
                                 }
@@ -5134,8 +5164,8 @@ function App() {
                     message += `, ${errorCount} failed`;
                     toast.warning(message);
                 } else {
-                    toast.success(message);
-                    setHasUnsavedChainChanges(false);
+                toast.success(message);
+                setHasUnsavedChainChanges(false);
                     
                     // Trigger rule selector refresh by dispatching a custom event
                     if (typeof window !== 'undefined') {
@@ -5145,8 +5175,7 @@ function App() {
                     }
                     
                     // Clear the current rule cache to force fresh data fetch
-                    setJsonData(null);
-                    setCurrentRule(null);
+                    setJsonData(DEFAULT_RULE_TEMPLATE);
                     
                     // Regenerate the chain with fresh data from the backend
                     if (chainStartRuleId) {
@@ -5591,7 +5620,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                                 disabled={isLoading.chainData}
                                             />
                                         </div>
-                                    </div>
+                                        </div>
                                     
                                     {/* Validation status */}
                                     {ruleChainData && Object.keys(ruleChainData.nodes).length > 0 && (() => {
@@ -5608,7 +5637,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                                 <div className="flex items-center gap-2 text-xs text-yellow-600 dark:text-yellow-400">
                                                     <AlertCircle className="w-3 h-3" />
                                                     <span>{invalidRules.length} rule{invalidRules.length !== 1 ? 's' : ''} need{invalidRules.length === 1 ? 's' : ''} validation</span>
-                                                </div>
+                                    </div>
                                             );
                                         }
                                         return null;

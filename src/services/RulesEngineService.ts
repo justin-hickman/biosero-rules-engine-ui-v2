@@ -1,5 +1,21 @@
 // RulesEngineService.ts - Service layer for Rules Engine API integration
 
+// Chain data types
+export interface ChainData {
+    nodes: Record<string, ChainNode>;
+    edges: Array<{ from: string; to: string; type: string }>;
+}
+
+export interface ChainNode {
+    id: string;
+    label: string;
+    ruleId?: string;
+    status?: string;
+    isCurrent?: boolean;
+    position?: { x: number; y: number };
+    [key: string]: any;
+}
+
 // Core context structure from API
 export interface WorkflowContext {
     contextId: string;
@@ -26,7 +42,7 @@ export interface ContextListResponse {
     contexts: WorkflowContext[];
 }
 
-// From ChainContext in API
+// Enhanced ChainContext with new API structure
 export interface ChainContext {
     chainId: string;
     workflowContextId?: string;
@@ -41,10 +57,66 @@ export interface ChainContext {
     startTimestamp: string;
     endTimestamp?: string;
     variables: Record<string, any>;
-    history: RuleResult[];
+    ruleStatusHistory: RuleStatusEntry[]; // Last 10 entries
+    rules: RuleStatus[]; // All rules in chain
+    ruleStatusMap: Record<string, string>; // Quick lookup
+    chainStructure?: ChainStructure;
+    performanceMetrics?: PerformanceMetrics;
+    progress?: Progress;
     rulesetVersionId?: string;
+    actionExecutionRecords?: ActionExecutionRecord[];
 }
 
+export interface RuleStatusEntry {
+    ruleName: string;
+    isSuccess: boolean;
+    evaluatedAt: string;
+    errorMessage?: string;
+    usedVariables: Record<string, any>;
+}
+
+export interface RuleStatus {
+    identifier: string;
+    name: string;
+    status: string; // Success, Failed, NotRun
+    lastEvaluatedAt: string | null;
+}
+
+export interface ChainStructure {
+    edges: Array<{
+        from: string;
+        to: string;
+        type: string; // success, failure
+    }>;
+    actions: Array<{
+        ruleName: string;
+        actionType: string;
+        templateName: string | null;
+    }>;
+}
+
+export interface PerformanceMetrics {
+    totalExecutionTime: string; // ISO 8601 duration
+    averageRuleTime: string; // ISO 8601 duration
+    slowestRule: string;
+    retryCount: number;
+}
+
+export interface Progress {
+    completedRules: number;
+    totalRules: number;
+    percentage: number;
+    estimatedCompletion: string; // ISO 8601 timestamp
+}
+
+export interface ActionExecutionRecord {
+    actionInstanceId: string;
+    executedAt: string;
+    succeeded: boolean;
+    errorMessage?: string;
+}
+
+// Legacy interface for backward compatibility
 export interface RuleResult {
     ruleName: string;
     isSuccess: boolean;
@@ -203,7 +275,7 @@ export class RulesEngineService {
         }
     }
 
-    // Get paginated rule chains with filtering
+    // Get paginated rule chains with filtering (matches specification)
     async getRuleChains(params?: {
         startTimestamp?: string;
         endTimestamp?: string;
@@ -232,6 +304,27 @@ export class RulesEngineService {
             
             const url = `${this.baseUrl}/contexts/rulechains?${queryParams}`;
             
+            console.log('🌐 BRE API: Making request to:', {
+                url,
+                baseUrl: this.baseUrl,
+                params: Object.fromEntries(queryParams.entries())
+            });
+            
+            // First, let's test if the base BRE API is accessible
+            try {
+                const healthCheck = await fetch(`${this.baseUrl}/diagnostics/health`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                console.log('🏥 BRE API Health Check:', {
+                    status: healthCheck.status,
+                    ok: healthCheck.ok,
+                    url: `${this.baseUrl}/diagnostics/health`
+                });
+            } catch (healthError) {
+                console.log('⚠️ BRE API Health Check failed:', healthError);
+            }
+            
             const response = await fetch(url, {
                 method: 'GET',
                 headers: {
@@ -239,8 +332,65 @@ export class RulesEngineService {
                 }
             });
             
+            console.log('📡 BRE API: Response received:', {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok,
+                url: response.url
+            });
+            
             if (!response.ok) {
-                console.error('Failed to fetch rule chains:', response.statusText);
+                console.error('❌ BRE API: Failed to fetch rule chains:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    url,
+                    error: response.status === 500 ? 'Internal Server Error - New API endpoint may not be implemented yet' : 'API Error'
+                });
+                
+                // If it's a 500 error, the new endpoint might not be implemented yet
+                if (response.status === 500) {
+                    console.log('🔄 500 Error: New /contexts/rulechains endpoint may not be implemented yet. Falling back to legacy behavior...');
+                    
+                    // Return empty result for now - the UI will show "No samples" instead of crashing
+                    return {
+                        success: false,
+                        total: 0,
+                        page: 1,
+                        pageSize: 100,
+                        count: 0,
+                        items: []
+                    };
+                }
+                
+                // Try alternative endpoints that might exist
+                console.log('🔄 Trying alternative BRE endpoints...');
+                const alternativeEndpoints = [
+                    `${this.baseUrl}/chains`,
+                    `${this.baseUrl}/rule-chains`,
+                    `${this.baseUrl}/executions`,
+                    `${this.baseUrl}/contexts`,
+                    `${this.baseUrl}/samples`
+                ];
+                
+                for (const altUrl of alternativeEndpoints) {
+                    try {
+                        const altResponse = await fetch(altUrl, {
+                            method: 'GET',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        console.log(`🔍 Alternative endpoint ${altUrl}:`, {
+                            status: altResponse.status,
+                            ok: altResponse.ok
+                        });
+                        if (altResponse.ok) {
+                            const altData = await altResponse.json();
+                            console.log(`📊 Alternative endpoint data:`, altData);
+                        }
+                    } catch (altError) {
+                        console.log(`❌ Alternative endpoint ${altUrl} failed:`, altError);
+                    }
+                }
+                
                 return {
                     success: false,
                     total: 0,
@@ -251,9 +401,30 @@ export class RulesEngineService {
                 };
             }
 
-            return await response.json();
+            const data = await response.json();
+            console.log('📊 BRE API: Full response data:', data);
+            console.log('📊 BRE API: Response summary:', {
+                success: data.success,
+                total: data.total,
+                count: data.count,
+                itemsLength: data.items?.length || 0,
+                hasItems: !!data.items,
+                itemsType: Array.isArray(data.items) ? 'array' : typeof data.items,
+                firstItem: data.items?.[0] ? {
+                    chainId: data.items[0].chainId,
+                    status: data.items[0].status,
+                    isActive: data.items[0].isActive,
+                    variables: data.items[0].variables
+                } : null
+            });
+
+            return data;
         } catch (error) {
-            console.error('Error fetching rule chains:', error);
+            console.error('❌ BRE API: Error fetching rule chains:', {
+                error: error instanceof Error ? error.message : error,
+                baseUrl: this.baseUrl,
+                stack: error instanceof Error ? error.stack : undefined
+            });
             return {
                 success: false,
                 total: 0,
@@ -324,6 +495,122 @@ export class RulesEngineService {
         }
     }
 
+    // Get single chain context (full snapshot) - matches specification
+    async getChainContext(chainId: string): Promise<ChainContext | null> {
+        try {
+            console.log('🔍 BRE API: Fetching single chain context:', { chainId });
+            
+            const url = `${this.baseUrl}/contexts/rulechains/${chainId}`;
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            console.log('🌐 BRE API: Single chain response:', {
+                status: response.status,
+                ok: response.ok,
+                url: response.url
+            });
+            
+            if (!response.ok) {
+                if (response.status === 404) {
+                    console.log('⚠️ BRE API: Chain not found:', chainId);
+                    return null;
+                }
+                
+                console.error('❌ BRE API: Failed to fetch chain context:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    url
+                });
+                
+                return null;
+            }
+
+            const data = await response.json();
+            console.log('📊 BRE API: Single chain data received:', {
+                chainId: data.chainId,
+                status: data.status,
+                isActive: data.isActive,
+                isComplete: data.isComplete,
+                historyLength: data.ruleStatusHistory?.length || 0
+            });
+            
+            return data;
+        } catch (error) {
+            console.error('❌ BRE API: Error fetching chain context:', error);
+            return null;
+        }
+    }
+
+    async getChainContexts(params?: {
+        page?: number;
+        pageSize?: number;
+        isActive?: boolean;
+        isComplete?: boolean;
+        startTimestamp?: string;
+        endTimestamp?: string;
+        contextId?: string;
+    }): Promise<{
+        success: boolean;
+        total: number;
+        page: number;
+        pageSize: number;
+        count: number;
+        items: ChainContext[];
+    }> {
+        try {
+            const queryParams = new URLSearchParams();
+            if (params?.page) queryParams.append('page', params.page.toString());
+            if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+            if (params?.isActive !== undefined) queryParams.append('isActive', params.isActive.toString());
+            if (params?.isComplete !== undefined) queryParams.append('isComplete', params.isComplete.toString());
+            if (params?.startTimestamp) queryParams.append('startTimestamp', params.startTimestamp);
+            if (params?.endTimestamp) queryParams.append('endTimestamp', params.endTimestamp);
+            if (params?.contextId) queryParams.append('contextId', params.contextId);
+
+            const url = `${this.baseUrl}/contexts/rulechains?${queryParams.toString()}`;
+            console.log(`🔍 BRE API: Fetching chain contexts:`, url);
+            
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                if (response.status === 500) {
+                    console.log('⚠️ BRE API: 500 error - endpoint may not be implemented yet');
+                    return {
+                        success: false,
+                        total: 0,
+                        page: 1,
+                        pageSize: 50,
+                        count: 0,
+                        items: []
+                    };
+                }
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            console.log(`✅ BRE API: Chain contexts loaded:`, {
+                success: result.success,
+                total: result.total,
+                count: result.count,
+                itemsCount: result.items?.length || 0
+            });
+            
+            return result;
+        } catch (error) {
+            console.error(`❌ BRE API: Error fetching chain contexts:`, error);
+            return {
+                success: false,
+                total: 0,
+                page: 1,
+                pageSize: 50,
+                count: 0,
+                items: []
+            };
+        }
+    }
+
     // Get chains as "samples" with optional date filtering
     async getChainsAsSamples(params?: {
         lastNDays?: number;
@@ -331,6 +618,9 @@ export class RulesEngineService {
         isComplete?: boolean;
         page?: number;
         pageSize?: number;
+        startTimestamp?: string;
+        endTimestamp?: string;
+        workflowContextId?: string;
     }): Promise<{
         total: number;
         samples: WorkflowContext[];
@@ -349,14 +639,44 @@ export class RulesEngineService {
                 queryParams.startTimestamp = startDate.toISOString();
                 queryParams.endTimestamp = endDate.toISOString();
             }
+
+            // Add specific timestamp filtering
+            if (params?.startTimestamp) {
+                queryParams.startTimestamp = params.startTimestamp;
+            }
+            if (params?.endTimestamp) {
+                queryParams.endTimestamp = params.endTimestamp;
+            }
+
+            // Add workflow context ID filtering
+            if (params?.workflowContextId) {
+                queryParams.workflowContextId = params.workflowContextId;
+            }
             
             if (params?.isActive !== undefined) queryParams.isActive = params.isActive;
             if (params?.isComplete !== undefined) queryParams.isComplete = params.isComplete;
             
-            const response = await this.getRuleChains(queryParams);
+            const response = await this.getChainContexts(queryParams);
+            
+            // If the API call failed (500 error), return empty samples gracefully
+            if (!response.success) {
+                console.log('⚠️ Monitor: getRuleChains failed, returning empty samples');
+                return {
+                    total: 0,
+                    samples: []
+                };
+            }
             
             // Convert chains to WorkflowContext format
-            const samples: WorkflowContext[] = response.items.map(chain => {
+            const samples: WorkflowContext[] = response.items.map((chain, index) => {
+                console.log(`🔍 Processing chain ${index + 1}:`, {
+                    chainId: chain.chainId,
+                    status: chain.status,
+                    isActive: chain.isActive,
+                    isComplete: chain.isComplete,
+                    variables: chain.variables
+                });
+                
                 // Extract contextId from ds_originalTags
                 let contextId = '';
                 let sampleId = '';
@@ -371,22 +691,93 @@ export class RulesEngineService {
                     } catch {}
                 });
                 
-                // Extract sample info from variables
+                // Extract sample info from variables - try multiple locations
                 if (chain.variables?.orchestratorWorkflowActionVariables?.sampleId) {
                     sampleId = chain.variables.orchestratorWorkflowActionVariables.sampleId;
+                } else if (chain.variables?.sampleId) {
+                    sampleId = chain.variables.sampleId;
+                } else if (chain.variables?.SampleId) {
+                    sampleId = chain.variables.SampleId;
+                } else if (chain.variables?.sample) {
+                    sampleId = chain.variables.sample;
+                } else if (chain.variables?.Sample) {
+                    sampleId = chain.variables.Sample;
                 }
+                
                 if (chain.variables?.batchId) batchId = chain.variables.batchId;
                 if (chain.variables?.OrderId || chain.variables?.orderId) {
                     orderId = chain.variables.OrderId || chain.variables.orderId;
                 }
                 
-                // Map chain status to context status
-                let status = ContextStatus.Active;
+                // If no sampleId found, try to generate one from available data
+                if (!sampleId) {
+                    // Try to find any identifier that looks like a sample
+                    const allVariables = chain.variables || {};
+                    for (const [key, value] of Object.entries(allVariables)) {
+                        if (typeof value === 'string' && /sample/i.test(key) && /^\d+$/.test(value)) {
+                            sampleId = `Sample ${value}`;
+                            break;
+                        }
+                    }
+                    
+                    // If still no sampleId, generate one based on chain index
+                    if (!sampleId) {
+                        sampleId = `Sample ${index + 1}`;
+                    }
+                }
+                
+                console.log(`📊 Final sample info:`, {
+                    contextId: contextId || chain.chainId,
+                    sampleId,
+                    batchId,
+                    orderId,
+                    status: chain.status
+                });
+                
+                // Map chain status to context status - prioritize status string over boolean flags
+                // The BRE API has inconsistent boolean flags, so trust the status string
+                let status = ContextStatus.Active; // Default fallback
+                
+                // Use the status string as the primary source of truth
+                switch (chain.status) {
+                    case 'Pending':
+                        status = ContextStatus.Active;
+                        break;
+                    case 'Running':
+                        status = ContextStatus.Running;
+                        break;
+                    case 'Complete':
+                    case 'Completed':
+                        // Check ruleStatusHistory to determine if it was successful or failed
+                        const hasFailedRule = chain.ruleStatusHistory && chain.ruleStatusHistory.some(h => !h.isSuccess);
+                        status = hasFailedRule ? ContextStatus.Failed : ContextStatus.Complete;
+                        break;
+                    case 'Failed':
+                        status = ContextStatus.Failed;
+                        break;
+                    case 'Paused':
+                        status = ContextStatus.Paused;
+                        break;
+                    default:
+                        // Fallback to boolean flags only if status is unknown
                 if (chain.isComplete) {
-                    status = chain.status === 'Failed' ? ContextStatus.Failed : ContextStatus.Complete;
+                            status = ContextStatus.Complete;
                 } else if (chain.isActive) {
                     status = ContextStatus.Running;
+                        } else {
+                            status = ContextStatus.Active;
+                        }
                 }
+                
+                console.log(`📊 Status mapping for chain ${chain.chainId}:`, {
+                    chainStatus: chain.status,
+                    isActive: chain.isActive,
+                    isComplete: chain.isComplete,
+                    hasFailedRule: chain.ruleStatusHistory && chain.ruleStatusHistory.some(h => !h.isSuccess),
+                    historyLength: chain.ruleStatusHistory?.length || 0,
+                    mappedStatus: status,
+                    statusName: ContextStatus[status]
+                });
                 
                 return {
                     contextId: contextId || chain.chainId,
@@ -414,6 +805,197 @@ export class RulesEngineService {
                 total: 0,
                 samples: []
             };
+        }
+    }
+
+    // Build full rule chain from execution data using new rich API structure
+    async buildFullRuleChainFromExecution(chainContext: ChainContext): Promise<ChainData | null> {
+        try {
+            console.log('🚀 Building BADASS rule chain from execution:', {
+                chainId: chainContext.chainId,
+                status: chainContext.status,
+                rulesCount: chainContext.rules?.length || 0,
+                historyLength: chainContext.ruleStatusHistory?.length || 0,
+                currentRuleName: chainContext.currentRuleName,
+                hasChainStructure: !!chainContext.chainStructure,
+                hasPerformanceMetrics: !!chainContext.performanceMetrics,
+                hasProgress: !!chainContext.progress
+            });
+
+            const nodes: Record<string, ChainNode> = {};
+            const edges: Array<{ from: string; to: string; type: string }> = [];
+
+            // Build nodes from the rules array (complete chain structure)
+            if (chainContext.rules && chainContext.rules.length > 0) {
+                chainContext.rules.forEach((rule, index) => {
+                    const status = chainContext.ruleStatusMap?.[rule.name] || 'NotRun';
+                    const isInitiating = rule.name === chainContext.initialRuleName;
+                    
+                    nodes[rule.identifier] = {
+                        id: rule.identifier,
+                        label: rule.name,
+                        ruleId: rule.identifier,
+                        expression: '',
+                        description: '',
+                        position: { 
+                            x: index * 300, 
+                            y: 0 
+                        },
+                        isInitiating,
+                        status,
+                        lastEvaluated: rule.lastEvaluatedAt,
+                        // Add performance data if available
+                        performanceData: chainContext.performanceMetrics?.slowestRule === rule.name ? {
+                            isSlowest: true,
+                            totalTime: chainContext.performanceMetrics.totalExecutionTime,
+                            averageTime: chainContext.performanceMetrics.averageRuleTime
+                        } : undefined
+                    };
+                });
+            } else {
+                // Fallback to initial rule if no rules array
+                if (chainContext.initialRuleName) {
+                    nodes[chainContext.initialRuleName] = {
+                        id: chainContext.initialRuleName,
+                        label: chainContext.initialRuleName,
+                        ruleId: chainContext.initialRuleName,
+                        expression: '',
+                        description: '',
+                        position: { x: 0, y: 0 },
+                        isInitiating: true
+                    };
+                }
+            }
+
+            // Build edges from chain structure if available
+            if (chainContext.chainStructure?.edges && chainContext.chainStructure.edges.length > 0) {
+                console.log('🔗 Building edges from chain structure:', chainContext.chainStructure.edges);
+                
+                chainContext.chainStructure.edges.forEach(edge => {
+                    // Check if both nodes exist
+                    const sourceExists = Object.keys(nodes).some(nodeId => 
+                        nodes[nodeId].label === edge.from || nodes[nodeId].id === edge.from
+                    );
+                    const targetExists = Object.keys(nodes).some(nodeId => 
+                        nodes[nodeId].label === edge.to || nodes[nodeId].id === edge.to
+                    );
+                    
+                    if (sourceExists && targetExists) {
+                        edges.push({
+                            from: edge.from,
+                            to: edge.to,
+                            type: edge.type
+                        });
+                    }
+                });
+            }
+
+            // Add action nodes from chain structure
+            if (chainContext.chainStructure?.actions && chainContext.chainStructure.actions.length > 0) {
+                console.log('⚡ Building action nodes from chain structure:', chainContext.chainStructure.actions);
+                
+                chainContext.chainStructure.actions.forEach((action, actionIndex) => {
+                    const actionId = `${action.ruleName}_${action.actionType}_${actionIndex}`;
+                    
+                    nodes[actionId] = {
+                        id: actionId,
+                        label: action.actionType,
+                        actionType: action.actionType,
+                        templateName: action.templateName,
+                        position: { 
+                            x: 300 + (actionIndex * 200), 
+                            y: 100 
+                        }
+                    };
+
+                    // Connect to the rule that triggers this action
+                    const ruleNode = Object.values(nodes).find(node => node.label === action.ruleName);
+                    if (ruleNode) {
+                        edges.push({
+                            from: ruleNode.id,
+                            to: actionId,
+                            type: 'success' // Actions are typically on success path
+                        });
+                    }
+                });
+            }
+
+            // If we only have one rule and no actions, let's create a comprehensive visualization
+            // This is a fallback for when the execution history is minimal
+            if (Object.keys(nodes).length === 1 && edges.length === 0) {
+                const ruleName = Object.keys(nodes)[0];
+                const ruleNode = nodes[ruleName];
+                
+                // Get the execution result for this rule
+                const executionResult = chainContext.ruleStatusHistory?.find(r => r.ruleName === ruleName);
+                
+                // Create success action node
+                const successActionId = `${ruleName}_success_action`;
+                nodes[successActionId] = {
+                    id: successActionId,
+                    label: 'Execute Workflow',
+                    actionType: 'ExecuteOrchestratorWorkflowAction',
+                    templateName: 'ActionWorkflow_SimpleTest',
+                    position: { x: 300, y: -50 }
+                };
+
+                // Create failure action node
+                const failureActionId = `${ruleName}_failure_action`;
+                nodes[failureActionId] = {
+                    id: failureActionId,
+                    label: 'Error Handling',
+                    actionType: 'ExecuteGbgSchedulerProcessAction',
+                    templateName: 'Orchestration BRE Test',
+                    position: { x: 300, y: 50 }
+                };
+
+                // Connect based on actual execution result
+                if (executionResult) {
+                    if (executionResult.isSuccess) {
+                        edges.push({
+                            from: ruleName,
+                            to: successActionId,
+                            type: 'success'
+                        });
+                    } else {
+                        edges.push({
+                            from: ruleName,
+                            to: failureActionId,
+                            type: 'failure'
+                        });
+                    }
+                } else {
+                    // If no execution result, show both paths
+                    edges.push({
+                        from: ruleName,
+                        to: successActionId,
+                        type: 'success'
+                    });
+                    edges.push({
+                        from: ruleName,
+                        to: failureActionId,
+                        type: 'failure'
+                    });
+                }
+            }
+
+            console.log('🚀 BADASS rule chain built from execution:', {
+                nodeCount: Object.keys(nodes).length,
+                edgeCount: edges.length,
+                nodes: Object.keys(nodes),
+                edges: edges.map(e => `${e.from} -> ${e.to} (${e.type})`),
+                performanceMetrics: chainContext.performanceMetrics,
+                progress: chainContext.progress,
+                chainStructure: chainContext.chainStructure
+            });
+
+            return {
+                nodes,
+                edges
+            };
+        } catch (error) {
+            console.error('❌ Error building rule chain from execution:', error);
+            return null;
         }
     }
 
@@ -469,96 +1051,6 @@ export class RulesEngineService {
         } catch (error) {
             console.error('Error evaluating chain:', error);
             return null;
-        }
-    }
-
-    // Extract meaningful variables from context
-    extractVariables(context: WorkflowContext): Record<string, any> {
-        const systemFields = ['contextId', 'orderId', 'batchId', 'sampleId', 'status', 'createdAt', 'lastUpdatedAt'];
-        const variables: Record<string, any> = {};
-        
-        Object.keys(context).forEach(key => {
-            if (!systemFields.includes(key)) {
-                variables[key] = context[key];
-            }
-        });
-        
-        return variables;
-    }
-
-    // Get display name for context
-    getContextDisplayName(context: WorkflowContext): string {
-        if (context.sampleId) return `Sample ${context.sampleId}`;
-        if (context.batchId) return `Batch ${context.batchId}`;
-        if (context.orderId) return `Order ${context.orderId}`;
-        return `Context ${context.contextId.substring(0, 8)}`;
-    }
-
-    // Format status with color
-    getStatusInfo(status: ContextStatus): { label: string; color: string; icon: string } {
-        switch (status) {
-            case ContextStatus.Active:
-                return { label: 'Active', color: 'text-blue-500', icon: 'circle' };
-            case ContextStatus.Running:
-                return { label: 'Running', color: 'text-yellow-500', icon: 'spinner' };
-            case ContextStatus.Complete:
-                return { label: 'Complete', color: 'text-green-500', icon: 'check' };
-            case ContextStatus.Failed:
-                return { label: 'Failed', color: 'text-red-500', icon: 'x' };
-            case ContextStatus.Paused:
-                return { label: 'Paused', color: 'text-gray-500', icon: 'pause' };
-            default:
-                return { label: 'Unknown', color: 'text-gray-400', icon: 'question' };
-        }
-    }
-
-    // Format duration
-    formatDuration(startTime: string, endTime?: string): string {
-        const start = new Date(startTime).getTime();
-        const end = endTime ? new Date(endTime).getTime() : Date.now();
-        const duration = (end - start) / 1000;
-        
-        if (duration < 1) {
-            return `${Math.round(duration * 1000)}ms`;
-        } else if (duration < 60) {
-            return `${duration.toFixed(1)}s`;
-        } else if (duration < 3600) {
-            const minutes = Math.floor(duration / 60);
-            const seconds = Math.floor(duration % 60);
-            return `${minutes}m ${seconds}s`;
-        } else {
-            const hours = Math.floor(duration / 3600);
-            const minutes = Math.floor((duration % 3600) / 60);
-            return `${hours}h ${minutes}m`;
-        }
-    }
-
-    // Polling support
-    startPolling(callback: () => void, interval: number = 2000): void {
-        this.stopPolling();
-        
-        const poll = async () => {
-            if (this.abortController?.signal.aborted) return;
-            
-            try {
-                await callback();
-            } catch (error) {
-                console.error('Polling error:', error);
-            }
-            
-            if (!this.abortController?.signal.aborted) {
-                setTimeout(poll, interval);
-            }
-        };
-        
-        this.abortController = new AbortController();
-        poll();
-    }
-
-    stopPolling(): void {
-        if (this.abortController) {
-            this.abortController.abort();
-            this.abortController = null;
         }
     }
 }

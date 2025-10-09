@@ -28,7 +28,39 @@ import {
     GitBranch,
     Lightning
 } from '@phosphor-icons/react';
-import { ChainData, ChainNode } from '../App';
+// Import types from App.tsx
+type ChainData = {
+    nodes: Record<string, ChainNode>;
+    edges: Array<{
+        from: string;
+        to: string;
+        type: 'success' | 'failure' | 'connection';
+        label?: string;
+    }>;
+};
+
+type ChainNode = {
+    id: string;
+    label: string;
+    ruleId?: string;
+    actionType?: string;
+    isInitiating?: boolean;
+    expression?: string;
+    description?: string;
+    successActions?: string[];
+    failureActions?: string[];
+    isError?: boolean;
+    isLoopEnd?: boolean;
+    templateName?: string;
+    inputParameters?: Record<string, any>;
+    outputParameters?: Record<string, any>;
+    targetRuleId?: string;
+    evaluationType?: string;
+    topic?: string;
+    variableMappings?: Record<string, any>;
+    position?: { x: number; y: number };
+    [key: string]: any;
+};
 import { RuleResult } from '../services/RulesEngineService';
 
 interface MonitorChainFlowProps {
@@ -36,6 +68,7 @@ interface MonitorChainFlowProps {
     executionHistory?: RuleResult[];
     currentRuleName?: string;
     onNodeClick?: (nodeId: string) => void;
+    chainContext?: any; // New ChainContext data
 }
 
 type NodeStatus = 'pending' | 'processing' | 'success' | 'failed' | 'skipped';
@@ -48,6 +81,9 @@ interface MonitorNodeData {
     isAction?: boolean;
     actionType?: string;
     templateName?: string;
+    expression?: string;
+    variables?: Record<string, any>;
+    [key: string]: any; // Add index signature
 }
 
 // Custom node component for monitoring
@@ -56,16 +92,14 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
     
     const getStatusIcon = () => {
         switch (data.status) {
-            case 'processing':
-                return <SpinnerGap className="w-4 h-4 animate-spin" />;
             case 'success':
-                return <CheckCircle className="w-4 h-4" weight="fill" />;
+                return <CheckCircle className="w-4 h-4 text-green-500" weight="fill" />;
             case 'failed':
-                return <XCircle className="w-4 h-4" weight="fill" />;
-            case 'skipped':
-                return <Pause className="w-4 h-4" weight="fill" />;
+                return <XCircle className="w-4 h-4 text-red-500" weight="fill" />;
+            case 'pending': // NotRun state
+                return <Circle className="w-4 h-4 text-gray-400" />;
             default:
-                return <Circle className="w-4 h-4" />;
+                return <Circle className="w-4 h-4 text-gray-400" />;
         }
     };
 
@@ -77,18 +111,18 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
         
         // Override border color based on status
         switch (data.status) {
-            case 'processing':
-                borderColor = "border-yellow-500 shadow-lg";
-                break;
             case 'success':
                 borderColor = "border-green-500";
                 break;
             case 'failed':
                 borderColor = "border-red-500";
                 break;
+            case 'pending': // NotRun state
+                borderColor = "border-gray-400";
+                break;
         }
         
-        return `${baseClasses} ${borderColor} ${data.status === 'processing' ? 'scale-105' : ''}`;
+        return `${baseClasses} ${borderColor}`;
     };
 
     const getIconColor = () => {
@@ -143,6 +177,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                     </div>
                 )}
                 
+                
                 {data.duration && (
                     <div className="text-xs text-slate-600 dark:text-slate-400 mt-2 flex items-center gap-1">
                         <Clock className="w-3 h-3" />
@@ -192,34 +227,73 @@ function MonitorChainFlowInner({
     chainData,
     executionHistory = [],
     currentRuleName,
-    onNodeClick
+    onNodeClick,
+    chainContext
 }: MonitorChainFlowProps) {
     // Calculate nodes and edges from chain data or execution history
     const { nodes, edges } = useMemo(() => {
+        console.log('🔍 MonitorChainFlow: Processing chain data:', {
+            chainData: chainData ? {
+                nodeCount: Object.keys(chainData.nodes).length,
+                edgeCount: chainData.edges.length,
+                nodeIds: Object.keys(chainData.nodes),
+                edges: chainData.edges.map(e => `${e.from} -> ${e.to}`)
+            } : null,
+            executionHistory: executionHistory.map(r => ({
+                ruleName: r.ruleName,
+                isSuccess: r.isSuccess,
+                errorMessage: r.errorMessage
+            })),
+            currentRuleName
+        });
+        
         const newNodes: Node[] = [];
         const newEdges: Edge[] = [];
         
-        // Calculate node statuses
+        // Calculate node statuses using new ChainContext data
         const nodeStatuses: Record<string, NodeStatus> = {};
         
-        // Process execution history to determine node statuses
-        executionHistory.forEach((result) => {
-            nodeStatuses[result.ruleName] = result.isSuccess ? 'success' : 'failed';
+        // Use new ChainContext data if available
+        if (chainContext?.ruleStatusMap) {
+            console.log('📊 MonitorChainFlow: Using ChainContext ruleStatusMap:', chainContext.ruleStatusMap);
             
-            // Also track action statuses if available
-            if (result.actionsToExecute) {
-                result.actionsToExecute.forEach((action: any) => {
-                    if (action.actionType) {
-                        const actionId = `${result.ruleName}_${action.actionType}`;
-                        nodeStatuses[actionId] = result.isSuccess ? 'success' : 'failed';
-                    }
-                });
-            }
-        });
+            Object.entries(chainContext.ruleStatusMap).forEach(([ruleName, status]) => {
+                switch (status) {
+                    case 'Success':
+                        nodeStatuses[ruleName] = 'success';
+                        break;
+                    case 'Failed':
+                    case 'Error':
+                        nodeStatuses[ruleName] = 'failed';
+                        break;
+                    case 'NotRun':
+                        nodeStatuses[ruleName] = 'pending';
+                        break;
+                    default:
+                        nodeStatuses[ruleName] = 'pending';
+                }
+            });
+        } else {
+            // Fallback to legacy execution history
+            console.log('📊 MonitorChainFlow: Using legacy execution history');
+            executionHistory.forEach((result) => {
+                nodeStatuses[result.ruleName] = result.isSuccess ? 'success' : 'failed';
+                
+                // Also track action statuses if available
+                if (result.actionsToExecute) {
+                    result.actionsToExecute.forEach((action: any) => {
+                        if (action.actionType) {
+                            const actionId = `${result.ruleName}_${action.actionType}`;
+                            nodeStatuses[actionId] = result.isSuccess ? 'success' : 'failed';
+                        }
+                    });
+                }
+            });
 
-        // Set current rule as processing only if it hasn't been executed yet
-        if (currentRuleName && !nodeStatuses[currentRuleName]) {
-            nodeStatuses[currentRuleName] = 'processing';
+            // Set current rule as processing only if it hasn't been executed yet
+            if (currentRuleName && !nodeStatuses[currentRuleName]) {
+                nodeStatuses[currentRuleName] = 'processing';
+            }
         }
 
         // If we have chainData, use it
@@ -263,6 +337,15 @@ function MonitorChainFlowInner({
                     templateName: node.templateName
                 };
 
+                console.log(`📊 Creating node ${nodeId}:`, {
+                    nodeData,
+                    executionResult: executionResult ? {
+                        ruleName: executionResult.ruleName,
+                        isSuccess: executionResult.isSuccess,
+                        errorMessage: executionResult.errorMessage
+                    } : null
+                });
+
                 newNodes.push({
                     id: nodeId,
                     type: 'monitor',
@@ -288,6 +371,18 @@ function MonitorChainFlowInner({
                     nodeStatuses[edge.to] = 'success';
                 }
 
+                // Use the edge styling that was already set in SampleMonitor.tsx
+                const edgeStyle = edge.style || {};
+                const edgeAnimated = edge.animated || false;
+                
+                console.log(`🎨 MonitorChainFlow: Edge ${edge.from} -> ${edge.to}:`, {
+                    type: edge.type,
+                    style: edgeStyle,
+                    animated: edgeAnimated,
+                    isActivePath,
+                    isExecuted
+                });
+                
                 newEdges.push({
                     id: `edge-${index}`,
                     source: edge.from,
@@ -295,22 +390,22 @@ function MonitorChainFlowInner({
                     sourceHandle: edge.type,
                     targetHandle: undefined,
                     type: 'smoothstep',
-                    animated: targetStatus === 'processing',
+                    animated: edgeAnimated,
                     style: {
-                        stroke: isActivePath 
-                            ? (edge.type === 'success' ? '#16a34a' : '#dc2626')
-                            : '#94a3b8',
-                        strokeWidth: isActivePath ? 3 : 2,
-                        opacity: isExecuted ? 1 : 0.4,
-                        strokeDasharray: targetNode?.actionType ? '5,5' : undefined
+                        stroke: edgeStyle.stroke || (isActivePath 
+                            ? (edge.type === 'success' ? '#10b981' : '#dc2626')
+                            : '#64748b'), // More muted gray for inactive paths
+                        strokeWidth: edgeStyle.strokeWidth || 3, // Always use 3 for consistency
+                        opacity: isExecuted ? 1 : 0.2, // More muted opacity for inactive paths
+                        strokeDasharray: edgeStyle.strokeDasharray || (targetNode?.actionType ? '5,5' : undefined)
                     },
                     markerEnd: {
                         type: MarkerType.ArrowClosed,
-                        color: isActivePath 
-                            ? (edge.type === 'success' ? '#16a34a' : '#dc2626')
-                            : '#94a3b8',
-                        width: 20,
-                        height: 20,
+                        color: edgeStyle.stroke || (isActivePath 
+                            ? (edge.type === 'success' ? '#10b981' : '#dc2626')
+                            : '#64748b'), // More muted gray for inactive paths
+                        width: 10,
+                        height: 10,
                     },
                 });
             });
@@ -347,14 +442,14 @@ function MonitorChainFlowInner({
                         sourceHandle: prevResult.isSuccess ? 'success' : 'failure',
                         type: 'smoothstep',
                         style: {
-                            stroke: prevResult.isSuccess ? '#16a34a' : '#dc2626',
+                            stroke: prevResult.isSuccess ? '#10b981' : '#dc2626',
                             strokeWidth: 3,
                         },
                         markerEnd: {
                             type: MarkerType.ArrowClosed,
-                            color: prevResult.isSuccess ? '#16a34a' : '#dc2626',
-                            width: 20,
-                            height: 20,
+                            color: prevResult.isSuccess ? '#10b981' : '#dc2626',
+                            width: 10,
+                            height: 10,
                         },
                     });
                 }
@@ -388,13 +483,13 @@ function MonitorChainFlowInner({
                             sourceHandle: result.isSuccess ? 'success' : 'failure',
                             type: 'smoothstep',
                             style: {
-                                stroke: result.isSuccess ? '#16a34a' : '#dc2626',
+                                stroke: result.isSuccess ? '#10b981' : '#dc2626',
                                 strokeWidth: 2,
                                 strokeDasharray: '5,5',
                             },
                             markerEnd: {
                                 type: MarkerType.ArrowClosed,
-                                color: result.isSuccess ? '#16a34a' : '#dc2626',
+                                color: result.isSuccess ? '#10b981' : '#dc2626',
                                 width: 15,
                                 height: 15,
                             },
@@ -434,19 +529,26 @@ function MonitorChainFlowInner({
                         type: 'smoothstep',
                         animated: true,
                         style: {
-                            stroke: lastResult.isSuccess ? '#16a34a' : '#dc2626',
+                            stroke: lastResult.isSuccess ? '#10b981' : '#dc2626',
                             strokeWidth: 3,
                         },
                         markerEnd: {
                             type: MarkerType.ArrowClosed,
-                            color: lastResult.isSuccess ? '#16a34a' : '#dc2626',
-                            width: 20,
-                            height: 20,
+                            color: lastResult.isSuccess ? '#10b981' : '#dc2626',
+                            width: 10,
+                            height: 10,
                         },
                     });
                 }
             }
         }
+
+        console.log('📊 MonitorChainFlow: Final result:', {
+            nodeCount: newNodes.length,
+            edgeCount: newEdges.length,
+            nodes: newNodes.map(n => ({ id: n.id, label: n.data.label, status: n.data.status })),
+            edges: newEdges.map(e => ({ from: e.source, to: e.target, type: e.type }))
+        });
 
         return { nodes: newNodes, edges: newEdges };
     }, [chainData, executionHistory, currentRuleName]);
@@ -470,7 +572,7 @@ function MonitorChainFlowInner({
     }
 
     return (
-        <div className="h-full w-full">
+        <div className="h-full w-full pb-20"> {/* Add bottom padding to avoid overlapping with controls */}
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -478,13 +580,19 @@ function MonitorChainFlowInner({
                 onNodeClick={handleNodeClick}
                 fitView
                 fitViewOptions={{ 
-                    padding: 0.3,
+                    padding: 0.2,
                     includeHiddenNodes: false,
                     minZoom: 0.1,
-                    maxZoom: 1.5
+                    maxZoom: 1.5,
+                    nodes: nodes.filter(n => !n.data.isAction) // Only fit view to rule nodes, not action nodes
                 }}
                 defaultEdgeOptions={{
                     type: 'smoothstep',
+                    style: { 
+                        strokeWidth: 3
+                        // Don't set default stroke color - let individual edges set their own
+                    },
+                    animated: false
                 }}
                 minZoom={0.1}
                 maxZoom={2}
@@ -494,31 +602,20 @@ function MonitorChainFlowInner({
                 elementsSelectable={true}
             >
                 <Background variant={BackgroundVariant.Dots} />
-                <Controls />
-                <MiniMap />
+                {/* Removed Controls and MiniMap to eliminate white squares at bottom */}
                 
                 <Panel position="top-right" className="m-4">
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-lg border-2 border-slate-300 dark:border-slate-600">
-                        <div className="text-sm font-semibold mb-3 text-slate-900 dark:text-slate-100">Legend</div>
+                        <div className="text-sm font-semibold mb-3 text-slate-900 dark:text-slate-100">Rule Evaluation States</div>
                         <div className="space-y-2">
-                            <div className="flex items-center gap-3">
-                                <div className="flex items-center gap-2">
-                                    <GitBranch className="w-4 h-4 text-blue-500" />
-                                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Rule</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Lightning className="w-4 h-4 text-purple-500" />
-                                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Action</span>
-                                </div>
+                            <div className="flex items-center gap-2">
+                                <GitBranch className="w-4 h-4 text-blue-500" />
+                                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Rule</span>
                             </div>
                             <div className="border-t pt-2 space-y-1.5">
                                 <div className="flex items-center gap-2">
                                     <Circle className="w-4 h-4 text-gray-400" />
-                                    <span className="text-xs text-slate-600 dark:text-slate-400">Pending</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <SpinnerGap className="w-4 h-4 text-yellow-500 animate-spin" />
-                                    <span className="text-xs text-slate-600 dark:text-slate-400">Processing</span>
+                                    <span className="text-xs text-slate-600 dark:text-slate-400">NotRun</span>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <CheckCircle className="w-4 h-4 text-green-500" weight="fill" />

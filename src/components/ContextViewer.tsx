@@ -155,15 +155,24 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
         toast.success('Copied to clipboard');
     };
 
-    // Calculate execution progress
+    // Calculate execution progress using enriched payload data
     const executionProgress = chainExecution ? {
-        total: chainExecution.history.length,
-        success: chainExecution.history.filter(r => r.isSuccess).length,
-        failed: chainExecution.history.filter(r => !r.isSuccess).length,
-        percentage: chainExecution.isComplete ? 100 : 
-                   (chainExecution.history.length > 0 ? 
-                    Math.round((chainExecution.currentDepth / chainExecution.maxDepth) * 100) : 0)
+        total: chainExecution.progress?.totalRules || chainExecution.rules?.length || 0,
+        completed: chainExecution.progress?.completedRules || 0,
+        success: Object.values(chainExecution.ruleStatusMap || {}).filter(status => status === 'Success').length,
+        failed: Object.values(chainExecution.ruleStatusMap || {}).filter(status => status === 'Failed').length,
+        percentage: chainExecution.progress?.percentage || 0,
+        estimatedCompletion: chainExecution.progress?.estimatedCompletion
     } : null;
+
+    // Calculate running time
+    const runningTime = chainExecution ? (() => {
+        const startTime = new Date(chainExecution.startTimestamp).getTime();
+        const endTime = chainExecution.endTimestamp ? 
+            new Date(chainExecution.endTimestamp).getTime() : 
+            Date.now();
+        return endTime - startTime;
+    })() : 0;
 
     return (
         <div className="h-full w-full flex flex-col bg-background overflow-hidden">
@@ -219,12 +228,18 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                             </div>
                             
                             {executionProgress && (
-                                <div className="space-y-1">
+                                <div className="space-y-2">
                                     <div className="flex items-center justify-between text-xs">
                                         <span className="text-muted-foreground">Progress</span>
-                                        <span>{executionProgress.percentage}%</span>
+                                        <span className="font-medium">{executionProgress.percentage.toFixed(1)}%</span>
                                     </div>
-                                    <Progress value={executionProgress.percentage} className="h-1.5" />
+                                    <Progress value={executionProgress.percentage} className="h-2" />
+                                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                        <span>{executionProgress.completed} / {executionProgress.total} rules</span>
+                                        {executionProgress.estimatedCompletion && (
+                                            <span>ETA: {new Date(executionProgress.estimatedCompletion).toLocaleTimeString()}</span>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -233,7 +248,10 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Clock className="w-3 h-3" />
                         <span>
-                            Running for {rulesEngineService.formatDuration(context.createdAt, context.lastUpdatedAt)}
+                            Running for {chainExecution ? 
+                                rulesEngineService.formatDuration(chainExecution.startTimestamp, chainExecution.endTimestamp || new Date().toISOString()) :
+                                rulesEngineService.formatDuration(context.createdAt, context.lastUpdatedAt)
+                            }
                         </span>
                     </div>
                 </div>
@@ -247,7 +265,7 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                         Variables {Object.keys(variables).length > 0 && `(${Object.keys(variables).length})`}
                     </TabsTrigger>
                     <TabsTrigger value="execution">
-                        Execution {chainExecution && `(${chainExecution.history.length})`}
+                        Execution {chainExecution && `(${(chainExecution.history || chainExecution.ruleStatusHistory || []).length})`}
                     </TabsTrigger>
                     <TabsTrigger value="raw">Raw</TabsTrigger>
                 </TabsList>
@@ -310,20 +328,51 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent>
-                                    <div className="grid grid-cols-3 gap-4 text-center">
+                                    <div className="grid grid-cols-2 gap-4 text-center">
                                         <div className="space-y-1">
                                             <p className="text-2xl font-bold">{executionProgress!.total}</p>
                                             <p className="text-xs text-muted-foreground">Total Rules</p>
                                         </div>
                                         <div className="space-y-1">
-                                            <p className="text-2xl font-bold text-green-600">{executionProgress!.success}</p>
+                                            <p className="text-2xl font-bold text-blue-600">{executionProgress!.completed}</p>
+                                            <p className="text-xs text-muted-foreground">Completed</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 gap-4 text-center">
+                                        <div className="space-y-1">
+                                            <p className="text-xl font-bold text-green-600">{executionProgress!.success}</p>
                                             <p className="text-xs text-muted-foreground">Succeeded</p>
                                         </div>
                                         <div className="space-y-1">
-                                            <p className="text-2xl font-bold text-red-600">{executionProgress!.failed}</p>
+                                            <p className="text-xl font-bold text-red-600">{executionProgress!.failed}</p>
                                             <p className="text-xs text-muted-foreground">Failed</p>
                                         </div>
                                     </div>
+                                    
+                                    {chainExecution.performanceMetrics && (
+                                        <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+                                            <div className="text-xs font-medium text-muted-foreground mb-2">Performance</div>
+                                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                                <div>
+                                                    <span className="text-muted-foreground">Total Time:</span>
+                                                    <span className="ml-1 font-mono">{chainExecution.performanceMetrics.totalExecutionTime}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-muted-foreground">Avg Rule:</span>
+                                                    <span className="ml-1 font-mono">{chainExecution.performanceMetrics.averageRuleTime}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-muted-foreground">Slowest:</span>
+                                                    <span className="ml-1">{chainExecution.performanceMetrics.slowestRule}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-muted-foreground">Retries:</span>
+                                                    <span className="ml-1">{chainExecution.performanceMetrics.retryCount}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                     
                                     {chainExecution.errorMessage && (
                                         <div className="mt-4 p-3 bg-red-50 dark:bg-red-950/30 rounded-lg">
@@ -425,7 +474,7 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                                 </CardHeader>
                                 <CardContent>
                                     <div className="space-y-3">
-                                        {chainExecution.history.map((result, index) => {
+                                        {(chainExecution.history || chainExecution.ruleStatusHistory || []).map((result, index) => {
                                             const duration = result.evaluatedAt ? 
                                                 new Date(result.evaluatedAt).getTime() - 
                                                 new Date(chainExecution.startTimestamp).getTime() : 0;

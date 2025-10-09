@@ -1692,6 +1692,91 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                 />
                             </div>
                             
+                            {/* Variable Mappings Section */}
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <Label className="text-base font-medium">Variable Mappings</Label>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            const currentMappings = editingNode.variableMappings || [];
+                                            setEditingNode({
+                                                ...editingNode,
+                                                variableMappings: [...currentMappings, { from: '', to: '' }]
+                                            });
+                                        }}
+                                    >
+                                        + Add Mapping
+                                    </Button>
+                                </div>
+                                
+                                <div className="text-sm text-muted-foreground">
+                                    Map variables from this rule to child rules. Variables will be passed to connected rules.
+                                </div>
+                                
+                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                    {(editingNode.variableMappings || []).map((mapping: any, index: number) => (
+                                        <div key={index} className="flex items-center gap-2 p-2 border rounded-md">
+                                            <div className="flex-1">
+                                                <Label className="text-xs text-muted-foreground">From Variable</Label>
+                                                <Input
+                                                    value={mapping.from || ''}
+                                                    onChange={(e) => {
+                                                        const newMappings = [...(editingNode.variableMappings || [])];
+                                                        newMappings[index] = { ...mapping, from: e.target.value };
+                                                        setEditingNode({
+                                                            ...editingNode,
+                                                            variableMappings: newMappings
+                                                        });
+                                                    }}
+                                                    placeholder="e.g., RuleEval"
+                                                    className="text-sm"
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <Label className="text-xs text-muted-foreground">To Variable</Label>
+                                                <Input
+                                                    value={mapping.to || ''}
+                                                    onChange={(e) => {
+                                                        const newMappings = [...(editingNode.variableMappings || [])];
+                                                        newMappings[index] = { ...mapping, to: e.target.value };
+                                                        setEditingNode({
+                                                            ...editingNode,
+                                                            variableMappings: newMappings
+                                                        });
+                                                    }}
+                                                    placeholder="e.g., ParentResult"
+                                                    className="text-sm"
+                                                />
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                    const newMappings = (editingNode.variableMappings || []).filter((_: any, i: number) => i !== index);
+                                                    setEditingNode({
+                                                        ...editingNode,
+                                                        variableMappings: newMappings
+                                                    });
+                                                }}
+                                                className="text-red-600 hover:text-red-700"
+                                            >
+                                                Remove
+                                            </Button>
+                                        </div>
+                                    ))}
+                                    
+                                    {(!editingNode.variableMappings || editingNode.variableMappings.length === 0) && (
+                                        <div className="text-center py-4 text-muted-foreground text-sm">
+                                            No variable mappings configured. Click "Add Mapping" to create one.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            
                             <div className="flex items-center space-x-2">
                                 <Checkbox
                                     id="isInitiating"
@@ -1748,7 +1833,8 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                         ruleId: editingNode.ruleId || nodeKey, // Ensure ruleId is set
                                         expression: editingNode.expression,
                                         description: editingNode.description,
-                                        isInitiating: editingNode.isInitiating
+                                        isInitiating: editingNode.isInitiating,
+                                        variableMappings: editingNode.variableMappings || []
                                     };
                                     
                                     // Update edges if the node ID changed
