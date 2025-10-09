@@ -67,6 +67,13 @@ const SimpleRuleSelector: React.FC<SimpleRuleSelectorProps> = ({
         }
     }, [dataServicesRootURI, fetchRules]);
 
+    // Listen for external updates (e.g. after uploading rules) and refresh list
+    React.useEffect(() => {
+        const handler = () => fetchRules();
+        window.addEventListener('rules-updated', handler as EventListener);
+        return () => window.removeEventListener('rules-updated', handler as EventListener);
+    }, [fetchRules]);
+
     return (
         <div className="flex items-center gap-2">
             <Select

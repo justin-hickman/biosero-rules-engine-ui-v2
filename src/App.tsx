@@ -1,4 +1,5 @@
 import React from "react";
+import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { 
@@ -164,6 +165,7 @@ type ChainNode = {
     label: string;
     ruleId?: string;
     expression?: string;
+    description?: string;
     successActions?: string[];
     failureActions?: string[];
     isInitiating?: boolean;
@@ -1249,7 +1251,12 @@ const prepareRuleForApi = (uiRule: Rule): Rule => {
     if (!uiRule || typeof uiRule !== 'object') throw new Error("Invalid rule data");
     
     const outputRule = structuredClone(uiRule);
-    if (!outputRule.id) outputRule.id = generateRuleId();
+    // Use identifier if id is not present (for existing rules from API)
+    if (!outputRule.id && (outputRule as any).identifier) {
+        outputRule.id = (outputRule as any).identifier;
+    } else if (!outputRule.id) {
+        outputRule.id = generateRuleId();
+    }
     
     outputRule.typeIdentifier = "Business Rule";
     outputRule.properties = Array.isArray(outputRule.properties) ? outputRule.properties : [];
@@ -2458,12 +2465,12 @@ function ChainFlowDiagramInner({
             y: event.clientY,
         });
 
-        const newNodeId = `${type}-${Date.now()}`;
         let newNode: Node;
 
         // Create different types of nodes based on what was dragged
         if (type === 'rule') {
             const newRuleId = generateRuleId();
+            const newNodeId = newRuleId; // Use the ruleId as the nodeId for consistency
             newNode = {
                 id: newNodeId,
                 type: 'ruleNode',
@@ -2507,6 +2514,7 @@ function ChainFlowDiagramInner({
 
             const actionType = actionTypeMap[type] || 'UnknownAction';
             const actionLabel = type.replace('action-', '').replace(/^\w/, c => c.toUpperCase());
+            const newNodeId = `${type}-${Date.now()}`; // Action nodes can use timestamp IDs
 
             newNode = {
                 id: newNodeId,
@@ -2529,6 +2537,7 @@ function ChainFlowDiagramInner({
             };
         } else {
             // Fallback for unknown types
+            const newNodeId = `${type}-${Date.now()}`;
             newNode = {
                 id: newNodeId,
                 type: 'errorNode',
@@ -2554,7 +2563,7 @@ function ChainFlowDiagramInner({
             
             // Add the new node to chain data with proper business rule structure
             const chainNode: ChainNode = {
-                id: newNode.type === 'ruleNode' ? (newNode.data.ruleId as string) : newNodeId,
+                id: newNode.type === 'ruleNode' ? (newNode.data.ruleId as string) : newNode.id,
                 label: (newNode.data.label as string) || 'Unknown',
                 expression: typeof newNode.data.expression === 'string' ? newNode.data.expression : '',
                 isInitiating: false,
@@ -2571,7 +2580,7 @@ function ChainFlowDiagramInner({
             }
             
             // Use the correct node ID (rule ID for rule nodes, node ID for others)
-            const nodeKey = newNode.type === 'ruleNode' ? (newNode.data.ruleId as string) : newNodeId;
+            const nodeKey = newNode.type === 'ruleNode' ? (newNode.data.ruleId as string) : newNode.id;
             newChainData.nodes[nodeKey] = chainNode;
             onChainUpdate(newChainData);
         }
@@ -3009,34 +3018,54 @@ const RuleSelector: React.FC<RuleSelectorProps> = ({
     const sortRulesByName = (rules: any[]) => [...rules].sort((a, b) => (a?.name || '').localeCompare(b?.name || ''));
     
     const fetchAndSetRules = React.useCallback(async () => {
+        console.log('Rule selector: Starting fetchAndSetRules...');
         if (!dataServicesRootURI) {
+            console.log('Rule selector: No dataServicesRootURI, skipping fetch');
             setErrorMessage("Data Services URL not set.");
             setAvailableRules([]);
             setFilteredRules([]);
             return;
         }
         
+        console.log('Rule selector: Fetching rules from data services...');
         setIsLoading(true);
         setErrorMessage("");
         
         try {
             const rules = await apiFetchRules(dataServicesRootURI);
             const validRules = Array.isArray(rules) ? rules : [];
-            const sortedRules = sortRulesByName(validRules);
+            
+            // Deduplicate rules by identifier (id or identifier field)
+            const seenIds = new Set<string>();
+            const deduplicatedRules = validRules.filter(rule => {
+                const ruleId = rule.id || rule.identifier;
+                if (!ruleId || seenIds.has(ruleId)) {
+                    console.log(`Rule selector: Skipping duplicate rule with ID: ${ruleId}`);
+                    return false;
+                }
+                seenIds.add(ruleId);
+                return true;
+            });
+            
+            console.log(`Rule selector: Deduplicated ${validRules.length} rules to ${deduplicatedRules.length} unique rules`);
+            
+            const sortedRules = sortRulesByName(deduplicatedRules);
             setAvailableRules(sortedRules);
             
             const initialFiltered = filterFn ? sortedRules.filter(filterFn) : sortedRules;
             setFilteredRules(initialFiltered);
             
             // Log for debugging
-            console.log(`RuleSelector: Found ${validRules.length} Business Rule type rules from API`);
-            if (validRules.length > 0) {
-                console.log('Sample rules:', validRules.slice(0, 3).map(r => ({
+            console.log(`Rule selector: Found ${validRules.length} rules from API, ${deduplicatedRules.length} after deduplication`);
+            console.log('Rule selector: Rule names:', deduplicatedRules.map(r => ({ id: r.id, name: r.name })));
+            if (deduplicatedRules.length > 0) {
+                console.log('Sample rules:', deduplicatedRules.slice(0, 3).map(r => ({
                     id: r.id || r.identifier,
                     name: r.name,
                     typeIdentifier: r.typeIdentifier
                 })));
             }
+            console.log('Rule selector: Fetch completed successfully');
         } catch (error: any) {
             let displayMessage = error.message;
             
@@ -3096,6 +3125,22 @@ const RuleSelector: React.FC<RuleSelectorProps> = ({
             setErrorMessage("Data Services URL not set.");
         }
     }, [rulesList, dataServicesRootURI, fetchAndSetRules, filterFn]);
+    
+    // Listen for rules updated event to refresh the list
+    React.useEffect(() => {
+        const handleRulesUpdated = () => {
+            console.log('Rule selector: Received rulesUpdated event');
+            if (dataServicesRootURI && !rulesList) {
+                console.log('Rule selector: Refreshing rule list from data services...');
+                fetchAndSetRules();
+            } else {
+                console.log('Rule selector: Skipping refresh (no dataServicesRootURI or using rulesList)');
+            }
+        };
+        
+        window.addEventListener('rulesUpdated', handleRulesUpdated);
+        return () => window.removeEventListener('rulesUpdated', handleRulesUpdated);
+    }, [dataServicesRootURI, rulesList, fetchAndSetRules]);
     
     React.useEffect(() => {
         const term = searchTerm.toLowerCase().trim();
@@ -4308,6 +4353,10 @@ function App() {
         setIsLoading(prev => ({ ...prev, upload: true }));
 
         try {
+            console.log(`=== UPLOADING INDIVIDUAL RULE ${ruleToUpload.id} ===`);
+            console.log('Rule identity JSON:', JSON.stringify(ruleToUpload, null, 2));
+            console.log(`=== END RULE ${ruleToUpload.id} ===`);
+            
             const result = await apiUploadRule(dataServicesRootURI, ruleToUpload);
             handleShowResponse({
                 success: true,
@@ -4318,6 +4367,11 @@ function App() {
                 rawResponse: result.rawResponse,
             });
             toast.success(`Rule uploaded: ${result.uploadedRuleId}`);
+            
+            // Trigger rule selector refresh
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('rulesUpdated'));
+            }
         } catch (error: any) {
             handleShowResponse({
                 success: false,
@@ -4408,12 +4462,17 @@ function App() {
         return (parsed && Array.isArray(parsed.Actions)) ? parsed.Actions : [];
     };
 
-    const buildRuleChainRecursively = async (startRuleId: string, dataServicesRootURI: string, currentRule?: Rule) => {
+    const buildRuleChainRecursively = async (startRuleId: string, dataServicesRootURI: string, currentRule?: Rule, forceFreshData: boolean = false) => {
         if (!startRuleId || !dataServicesRootURI) throw new Error("startRuleId and dataServicesRootURI required.");
 
         // graph
         const nodes: Record<string, ChainNode> = {};
         const edges: Array<{ from: string; to: string; type: 'success' | 'failure'; label?: string }> = [];
+        
+        // Helper function to check if an ID is a timestamp-based ID
+        const isTimestampBasedId = (id: string) => {
+            return /^rule-\d{13}$/.test(id);
+        };
 
         // caches
         const fetchCache = new Map<string, Promise<any>>();
@@ -4421,24 +4480,46 @@ function App() {
         let actionCounter = 0; // For generating unique action node IDs
 
         const fetchRule = async (ruleId: string) => {
+            console.log(`=== FETCHING RULE ${ruleId} ===`);
+            console.log(`Current rule context:`, { 
+                currentRuleId: currentRule?.id, 
+                currentRuleExists: !!currentRule,
+                forceFreshData: forceFreshData
+            });
+            
             // If this is the current rule being edited locally, use local data instead of API
-            if (ruleId === currentRule?.id && currentRule) {
+            // But only if we're not forcing fresh data from the backend
+            if (ruleId === currentRule?.id && currentRule && !forceFreshData) {
+                console.log(`Using local current rule data for ${ruleId}`);
                 return currentRule;
             }
             
             // Try to fetch from API first
             if (!fetchCache.has(ruleId)) {
+                console.log(`Fetching rule ${ruleId} from API...`);
                 fetchCache.set(ruleId, apiFetchRuleDetails(dataServicesRootURI, ruleId));
             }
             
             try {
                 const apiResult = await fetchCache.get(ruleId)!;
+                console.log(`API returned rule data for ${ruleId}:`, {
+                    identifier: apiResult?.identifier,
+                    id: apiResult?.id,
+                    name: apiResult?.name
+                });
+                
                 // Parse the API result to ensure consistent structure
                 const parsedRule = parseRuleFromApi(apiResult, ruleId);
+                console.log(`Parsed rule for ${ruleId}:`, {
+                    id: parsedRule.id,
+                    name: parsedRule.name
+                });
                 return parsedRule;
             } catch (error: any) {
+                console.log(`Error fetching rule ${ruleId}:`, error.message);
                 // If fetch fails (404 or other error), check if it's the current rule
                 if (ruleId === currentRule?.id && currentRule) {
+                    console.log(`Using current rule as fallback for ${ruleId}`);
                     return currentRule;
                 }
                 // Otherwise throw the error to be handled by the caller
@@ -4448,12 +4529,19 @@ function App() {
 
         const addNode = (nodeId: string, data: Partial<ChainNode>) => {
             const existingNode = nodes[nodeId] || {};
-            nodes[nodeId] = { 
+            const newNode = { 
                 ...existingNode,
                 id: nodeId, 
                 label: data.label || existingNode.label || nodeId,
                 ...data 
             };
+            
+            // Only set ruleId for rule nodes (not action nodes)
+            if (!data.actionType && !existingNode.actionType) {
+                newNode.ruleId = nodeId;
+            }
+            
+            nodes[nodeId] = newNode;
         };
 
         // Create action nodes for workflow and scheduler actions
@@ -4541,6 +4629,13 @@ function App() {
                 return;
             }
             if (processed.has(ruleId)) return;
+            
+            // Skip timestamp-based IDs - these are invalid rule IDs
+            if (isTimestampBasedId(ruleId)) {
+                console.log(`Skipping timestamp-based ID: ${ruleId}`);
+                processed.add(ruleId);
+                return;
+            }
 
             let details: any | null = null;
             try {
@@ -4561,6 +4656,7 @@ function App() {
             addNode(ruleId, {
                 label: details?.name || ruleId,
                 expression: exprShort || undefined,
+                description: details?.description || undefined,
                 isInitiating: ruleId === startRuleId,
                 isError: false
             });
@@ -4585,7 +4681,41 @@ function App() {
         return { nodes, edges };
     };
 
-    const handleGenerateChain = React.useCallback(async (startRuleId: string) => {
+    // Clean up chain data to remove timestamp-based IDs
+    const cleanupChainData = React.useCallback((chainData: ChainData) => {
+        const cleanedNodes: Record<string, ChainNode> = {};
+        const cleanedEdges: typeof chainData.edges = [];
+        
+        // Helper function to check if an ID is a timestamp-based ID
+        const isTimestampBasedId = (id: string) => {
+            return /^rule-\d{13}$/.test(id);
+        };
+        
+        // Filter out nodes with timestamp-based IDs
+        Object.entries(chainData.nodes).forEach(([nodeId, node]) => {
+            if (!isTimestampBasedId(nodeId)) {
+                cleanedNodes[nodeId] = node;
+            } else {
+                console.log(`Removing timestamp-based node: ${nodeId}`);
+            }
+        });
+        
+        // Filter out edges that reference timestamp-based IDs
+        chainData.edges.forEach(edge => {
+            if (!isTimestampBasedId(edge.from) && !isTimestampBasedId(edge.to)) {
+                cleanedEdges.push(edge);
+            } else {
+                console.log(`Removing edge with timestamp-based ID: ${edge.from} -> ${edge.to}`);
+            }
+        });
+        
+        return {
+            nodes: cleanedNodes,
+            edges: cleanedEdges
+        };
+    }, []);
+
+    const handleGenerateChain = React.useCallback(async (startRuleId: string, forceFreshData: boolean = false) => {
         if (!startRuleId) {
             toast.error("Please specify a start rule ID");
             return;
@@ -4602,12 +4732,19 @@ function App() {
         setChainError('');
 
         try {
-            const graph = await buildRuleChainRecursively(startRuleId, dataServicesRootURI, jsonData || undefined);
+            // Use fresh data from backend if forceFreshData is true, otherwise use jsonData
+            const currentRule = forceFreshData ? undefined : (jsonData || undefined);
+            const graph = await buildRuleChainRecursively(startRuleId, dataServicesRootURI, currentRule, forceFreshData);
             console.log('Generated recursive chain with', Object.keys(graph.nodes).length, 'nodes and', graph.edges.length, 'edges');
-            setRuleChainData(graph);
+            
+            // Clean up the chain data to remove timestamp-based IDs
+            const cleanedGraph = cleanupChainData(graph);
+            console.log('Cleaned chain data:', Object.keys(cleanedGraph.nodes).length, 'nodes and', cleanedGraph.edges.length, 'edges');
+            
+            setRuleChainData(cleanedGraph);
             setIsChainViewVisible(true);
             setHasUnsavedChainChanges(false);
-            toast.success(`Recursive chain map generated: ${Object.keys(graph.nodes).length} rules found`);
+            toast.success(`Recursive chain map generated: ${Object.keys(cleanedGraph.nodes).length} rules found`);
         } catch (error: any) {
             const message = error.message || 'Failed to generate chain';
             console.error('Chain generation error:', error);
@@ -4729,108 +4866,296 @@ function App() {
             return;
         }
         
+        // Validate rules before saving - include ALL rule nodes, not just those with existing ruleIds
+        const ruleNodes = Object.entries(ruleChainData.nodes)
+            .filter(([_, node]) => !node.actionType);
+        
+        const invalidRules: Array<{id: string, label: string, issues: string[]}> = [];
+        
+        ruleNodes.forEach(([nodeId, node]) => {
+            const issues: string[] = [];
+            
+            // Check for missing or empty label
+            if (!node.label || node.label.trim() === '') {
+                issues.push('Missing or empty label');
+            }
+            
+            // Check for missing or empty expression
+            if (!node.expression || node.expression.trim() === '') {
+                issues.push('Missing or empty rule expression');
+            }
+            
+            // Check for invalid rule ID
+            if (!node.ruleId && !nodeId) {
+                issues.push('Missing rule identifier');
+            }
+            
+            if (issues.length > 0) {
+                invalidRules.push({
+                    id: node.ruleId || nodeId,
+                    label: node.label || `Rule ${node.ruleId || nodeId}`,
+                    issues
+                });
+            }
+        });
+        
+        // Show warning if there are invalid rules
+        if (invalidRules.length > 0) {
+            const issueCount = invalidRules.reduce((sum, rule) => sum + rule.issues.length, 0);
+            const rulesText = invalidRules.length === 1 ? 'rule' : 'rules';
+            const issuesText = issueCount === 1 ? 'issue' : 'issues';
+            
+            const detailsText = invalidRules.map(rule => 
+                `• ${rule.label} (${rule.id}): ${rule.issues.join(', ')}`
+            ).join('\n');
+            
+            const confirmMessage = `Found ${invalidRules.length} ${rulesText} with ${issueCount} ${issuesText}:\n\n${detailsText}\n\nDo you want to save anyway? Missing expressions will be saved as empty strings.`;
+            
+            if (!confirm(confirmMessage)) {
+                toast.info('Save cancelled by user');
+                return;
+            }
+        }
+        
         setIsLoading(prev => ({ ...prev, chainData: true }));
         
         try {
-            const ruleNodes = Object.entries(ruleChainData.nodes)
-                .filter(([_, node]) => node.ruleId && !node.actionType);
-            
             let savedCount = 0;
+            let createdCount = 0;
             let errorCount = 0;
-            let skippedCount = 0;
             
             // Process each rule in the chain
+            console.log('=== CHAIN SAVE START ===');
+            console.log('Processing rules for save:', ruleNodes.map(([id, node]) => ({ 
+                id, 
+                ruleId: node.ruleId, 
+                label: node.label,
+                expression: node.expression,
+                hasRuleId: !!node.ruleId
+            })));
+            
             for (const [nodeId, node] of ruleNodes) {
                 try {
-                    // Fetch the current rule data
-                    let ruleData;
-                    try {
-                        ruleData = await apiFetchRuleDetails(dataServicesRootURI, node.ruleId!);
-                    } catch (fetchError: any) {
-                        // If rule doesn't exist (404), skip it - it needs to be created first
-                        if (fetchError.message?.includes('404') || fetchError.message?.includes('not found')) {
-                            console.warn(`Skipping rule ${node.ruleId}: Rule doesn't exist in data services yet`);
-                            skippedCount++;
-                            continue;
-                        }
-                        throw fetchError;
-                    }
-                    
-                    if (!ruleData || !ruleData.properties) {
-                        console.warn(`Skipping rule ${node.ruleId}: Invalid rule data`);
-                        skippedCount++;
-                        continue;
-                    }
-                    
-                    // Check if this is a new rule (has default template structure)
-                    const isNewRule = !ruleData.properties.find(p => p.name === 'RuleExpression')?.value || 
-                                     ruleData.description?.startsWith('New rule');
-                    if (isNewRule) {
-                        console.warn(`Skipping rule ${node.ruleId}: Rule needs to be created/saved first`);
-                        skippedCount++;
-                        continue;
-                    }
-                    
-                    // Convert chain connections to actions for this rule
-                    const { onSuccess, onFailure } = convertChainDataToRuleActions(ruleChainData, nodeId);
-                    
-                    // Update the rule's properties
-                    const updatedRule = {
-                        ...ruleData,
-                        properties: ruleData.properties.map(prop => {
-                            if (prop.name === "OnSuccess") {
-                                return {
-                                    ...prop,
-                                    value: { Actions: onSuccess }
-                                };
-                            } else if (prop.name === "OnFailure") {
-                                return {
-                                    ...prop,
-                                    value: { Actions: onFailure }
-                                };
-                            }
-                            return prop;
-                        })
-                    };
-                    
-                    // Save the rule to data services
-                    const apiUrl = `${dataServicesRootURI}${dataServicesRootURI.endsWith('/') ? '' : '/'}api/v3.0/identities/${node.ruleId}`;
-                    const response = await fetch(apiUrl, {
-                        method: 'PUT',
-                        headers: {
-                            'Accept': 'application/json',
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(updatedRule),
+                    console.log(`=== PROCESSING RULE ${nodeId} ===`);
+                    console.log('Node data:', { 
+                        ruleId: node.ruleId, 
+                        label: node.label, 
+                        expression: node.expression,
+                        description: node.description,
+                        isNewRule: !node.ruleId
                     });
                     
-                    if (!response.ok) {
-                        throw new Error(`Failed to save rule ${node.ruleId}: ${response.statusText}`);
+                    // Use the ruleId instead of nodeId for processing connections
+                    const ruleIdForActions = node.ruleId || nodeId;
+                    
+                    // Convert chain connections to actions for this rule
+                    const { onSuccess, onFailure } = convertChainDataToRuleActions(ruleChainData, ruleIdForActions);
+                    console.log(`=== ACTIONS FOR RULE ${ruleIdForActions} ===`);
+                    console.log('OnSuccess actions:', JSON.stringify(onSuccess, null, 2));
+                    console.log('OnFailure actions:', JSON.stringify(onFailure, null, 2));
+                    console.log(`=== END ACTIONS FOR RULE ${ruleIdForActions} ===`);
+                    
+                    // Determine the rule ID to use for this node
+                    const ruleIdToUse = node.ruleId || nodeId;
+                    
+                    // Try to fetch existing rule data first (only if we have a ruleId)
+                    let ruleData;
+                    let isExistingRule = false;
+                    
+                    if (node.ruleId) {
+                        try {
+                            ruleData = await apiFetchRuleDetails(dataServicesRootURI, node.ruleId);
+                            isExistingRule = true;
+                        } catch (fetchError: any) {
+                            // If rule doesn't exist (404), create a new one
+                            if (fetchError.message?.includes('404') || fetchError.message?.includes('not found')) {
+                                console.log(`Creating new rule ${node.ruleId} as it doesn't exist in data services`);
+                                ruleData = null;
+                            } else {
+                                throw fetchError;
+                            }
+                        }
+                    } else {
+                        // New rule without ruleId - will be created
+                        console.log(`Creating new rule with ID ${ruleIdToUse}`);
+                        ruleData = null;
                     }
                     
-                    savedCount++;
+                    // Create rule data structure
+                    let ruleToSave;
+                    
+                    if (isExistingRule && ruleData) {
+                        // Update existing rule with chain data
+                        ruleToSave = {
+                            ...ruleData,
+                            // Update the rule name if we have a label from the node
+                            name: node.label && node.label.trim() !== '' ? node.label.trim() : ruleData.name,
+                            // Update the rule description if we have one from the node
+                            description: node.description && node.description.trim() !== '' ? node.description.trim() : ruleData.description,
+                            properties: ruleData.properties.map(prop => {
+                                if (prop.name === "OnSuccess") {
+                                    return {
+                                        ...prop,
+                                        value: JSON.stringify({ Actions: onSuccess })
+                                    };
+                                } else if (prop.name === "OnFailure") {
+                                    return {
+                                        ...prop,
+                                        value: JSON.stringify({ Actions: onFailure })
+                                    };
+                                } else if (prop.name === "Expression") {
+                                    return {
+                                        ...prop,
+                                        value: node.expression && node.expression.trim() !== '' ? node.expression.trim() : prop.value
+                                    };
+                                }
+                                return prop;
+                            })
+                        };
+                        console.log(`=== UPDATING EXISTING RULE ${ruleIdToUse} ===`);
+                        console.log('Original rule data:', JSON.stringify(ruleData, null, 2));
+                        console.log('Updated rule data:', JSON.stringify(ruleToSave, null, 2));
+                        console.log(`=== END UPDATE FOR RULE ${ruleIdToUse} ===`);
+                    } else {
+                        // Create new rule with chain data - use the correct identity JSON structure
+                        console.log(`Creating new rule with ID: ${ruleIdToUse}`);
+                        
+                        // Ensure we have a proper name - if node.label is empty, use a default
+                        const ruleName = node.label && node.label.trim() !== '' 
+                            ? node.label.trim() 
+                            : `New Rule ${ruleIdToUse}`;
+                        
+                        // Ensure we have a proper description
+                        const ruleDescription = node.description && node.description.trim() !== ''
+                            ? node.description.trim()
+                            : `Rule created from chain map`;
+                        
+                        ruleToSave = {
+                            id: ruleIdToUse,
+                            name: ruleName,
+                            description: ruleDescription,
+                            typeIdentifier: "Business Rule",
+                            properties: [
+                                {
+                                    name: "RuleExpressionType",
+                                    value: "LambdaExpression",
+                                    valueType: "String"
+                                },
+                                {
+                                    name: "Expression",
+                                    value: node.expression && node.expression.trim() !== '' ? node.expression.trim() : "",
+                                    valueType: "String"
+                                },
+                                {
+                                    name: "ErrorMessage",
+                                    value: "",
+                                    valueType: "String"
+                                },
+                                {
+                                    name: "OnSuccess",
+                                    value: JSON.stringify({
+                                        Actions: onSuccess
+                                    }),
+                                    valueType: "String"
+                                },
+                                {
+                                    name: "OnFailure",
+                                    value: JSON.stringify({
+                                        Actions: onFailure
+                                    }),
+                                    valueType: "String"
+                                }
+                            ]
+                        };
+                        console.log('New rule payload:', JSON.stringify(ruleToSave, null, 2));
+                    }
+                    
+                    // Save the rule to data services using the existing apiUploadRule function
+                    console.log(`Uploading rule ${ruleIdToUse} to data services...`);
+                    console.log(`=== IDENTITY JSON FOR RULE ${ruleIdToUse} ===`);
+                    console.log(JSON.stringify(ruleToSave, null, 2));
+                    console.log(`=== END IDENTITY JSON FOR RULE ${ruleIdToUse} ===`);
+                    
+                    const uploadResult = await apiUploadRule(dataServicesRootURI, ruleToSave);
+                    console.log(`Upload result for ${ruleIdToUse}:`, {
+                        status: uploadResult.status,
+                        statusText: uploadResult.statusText,
+                        uploadedRuleId: uploadResult.uploadedRuleId,
+                        endpoint: uploadResult.endpoint
+                    });
+                    
+                    if (uploadResult.status >= 200 && uploadResult.status < 300) {
+                        if (isExistingRule) {
+                            console.log(`Rule ${ruleIdToUse} was updated (existed in data services)`);
+                            savedCount++;
+                        } else {
+                            console.log(`Rule ${ruleIdToUse} was created (new in data services)`);
+                            createdCount++;
+                            
+                            // Update the local node with the ruleId if it wasn't set before
+                            if (!node.ruleId && nodeId !== ruleIdToUse) {
+                                console.log(`Updating local node ${nodeId} with ruleId ${ruleIdToUse}`);
+                                // Update the chain data to reflect the new ruleId
+                                if (ruleChainData && ruleChainData.nodes[nodeId]) {
+                                    ruleChainData.nodes[nodeId].ruleId = ruleIdToUse;
+                                    // Also update the node ID to match the ruleId for consistency
+                                    if (nodeId !== ruleIdToUse) {
+                                        ruleChainData.nodes[ruleIdToUse] = { ...ruleChainData.nodes[nodeId], id: ruleIdToUse };
+                                        delete ruleChainData.nodes[nodeId];
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        throw new Error(uploadResult.statusText || 'Upload failed');
+                    }
+                    
                 } catch (error: any) {
-                    console.error(`Error saving rule ${node.ruleId}:`, error);
+                    console.error(`Error saving rule ${node.ruleId || nodeId}:`, error);
                     errorCount++;
                 }
             }
             
-            if (savedCount > 0 && errorCount === 0) {
-                const message = skippedCount > 0 
-                    ? `Chain saved: ${savedCount} rules updated, ${skippedCount} skipped (not created yet)`
-                    : `Chain saved: ${savedCount} rules updated`;
-                toast.success(message);
-                setHasUnsavedChainChanges(false);
-            } else if (savedCount > 0 && errorCount > 0) {
-                const message = `Chain partially saved: ${savedCount} succeeded, ${errorCount} failed` +
-                    (skippedCount > 0 ? `, ${skippedCount} skipped` : '');
-                toast.warning(message);
+            console.log('=== CHAIN SAVE COMPLETE ===');
+            console.log(`Results: ${savedCount} updated, ${createdCount} created, ${errorCount} failed`);
+            
+            // Provide comprehensive feedback
+            if (savedCount > 0 || createdCount > 0) {
+                let message = '';
+                if (savedCount > 0 && createdCount > 0) {
+                    message = `Chain saved: ${savedCount} rules updated, ${createdCount} rules created`;
+                } else if (savedCount > 0) {
+                    message = `Chain saved: ${savedCount} rules updated`;
+                } else if (createdCount > 0) {
+                    message = `Chain saved: ${createdCount} rules created`;
+                }
+                
+                if (errorCount > 0) {
+                    message += `, ${errorCount} failed`;
+                    toast.warning(message);
+                } else {
+                    toast.success(message);
+                    setHasUnsavedChainChanges(false);
+                    
+                    // Trigger rule selector refresh by dispatching a custom event
+                    if (typeof window !== 'undefined') {
+                        console.log('Triggering rule selector refresh...');
+                        window.dispatchEvent(new CustomEvent('rulesUpdated'));
+                        console.log('Rule selector refresh event dispatched');
+                    }
+                    
+                    // Clear the current rule cache to force fresh data fetch
+                    setJsonData(null);
+                    setCurrentRule(null);
+                    
+                    // Regenerate the chain with fresh data from the backend
+                    if (chainStartRuleId) {
+                        console.log('Regenerating chain with fresh data after save...');
+                        handleGenerateChain(chainStartRuleId, true); // Force fresh data from backend
+                    }
+                }
             } else if (errorCount > 0) {
-                const message = `Failed to save chain: ${errorCount} rules failed` +
-                    (skippedCount > 0 ? `, ${skippedCount} skipped` : '');
-                toast.error(message);
-            } else if (skippedCount > 0) {
-                toast.info(`No rules saved: ${skippedCount} rules need to be created first. Use the "Upload" button in the rule editor to save each rule.`);
+                toast.error(`Failed to save chain: ${errorCount} rules failed`);
             } else {
                 toast.info('No rules to save');
             }
@@ -4954,9 +5279,14 @@ function App() {
                                     <FloppyDisk size={16} />
                                     Save to File
                                 </Button>
-                                <Button onClick={handleUploadToApi} className="gap-2" disabled={isLoading.upload}>
+                                <Button 
+                                    onClick={handleUploadToApi} 
+                                    className="gap-2" 
+                                    disabled={isLoading.upload || isChainViewVisible}
+                                    title={isChainViewVisible ? "Upload is disabled when chain map is open. Use 'Save Chain' in the chain map dialog." : "Upload the current rule to Data Services"}
+                                >
                                     {isLoading.upload ? <SpinnerGap size={16} className="animate-spin" /> : <CloudArrowUp size={16} />}
-                                    {isLoading.upload ? "Uploading..." : "Upload"}
+                                    {isLoading.upload ? "Uploading..." : "Upload Current Rule"}
                                 </Button>
                                 <Button 
                                     onClick={() => setShowImportDialog(true)} 
@@ -5261,10 +5591,28 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                                 disabled={isLoading.chainData}
                                             />
                                         </div>
-                                        <div className="text-xs text-muted-foreground">
-                                            (or mark any rule as "Starting rule" in its edit dialog)
-                                        </div>
                                     </div>
+                                    
+                                    {/* Validation status */}
+                                    {ruleChainData && Object.keys(ruleChainData.nodes).length > 0 && (() => {
+                                        const ruleNodes = Object.entries(ruleChainData.nodes)
+                                            .filter(([_, node]) => node.ruleId && !node.actionType);
+                                        
+                                        const invalidRules = ruleNodes.filter(([_, node]) => 
+                                            !node.label || node.label.trim() === '' || 
+                                            !node.expression || node.expression.trim() === ''
+                                        );
+                                        
+                                        if (invalidRules.length > 0) {
+                                            return (
+                                                <div className="flex items-center gap-2 text-xs text-yellow-600 dark:text-yellow-400">
+                                                    <AlertCircle className="w-3 h-3" />
+                                                    <span>{invalidRules.length} rule{invalidRules.length !== 1 ? 's' : ''} need{invalidRules.length === 1 ? 's' : ''} validation</span>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
                                     
                                     {/* Right-aligned control buttons */}
                                     <div className="flex gap-1 flex-1 justify-end">

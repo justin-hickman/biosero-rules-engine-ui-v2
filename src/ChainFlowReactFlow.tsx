@@ -117,6 +117,10 @@ const RuleNode: React.FC<NodeProps> = ({ data, isConnectable, selected, id }) =>
     const isInitiating = nodeData.isInitiating;
     const { onEdit, onDelete } = React.useContext(NodeHandlersContext);
     
+    // Check for validation issues
+    const hasValidationIssues = !nodeData.label || nodeData.label.trim() === '' || 
+                               !nodeData.expression || nodeData.expression.trim() === '';
+    
     const handleEdit = React.useCallback(() => {
         if (onEdit) onEdit(id);
     }, [onEdit, id]);
@@ -131,6 +135,7 @@ const RuleNode: React.FC<NodeProps> = ({ data, isConnectable, selected, id }) =>
                 relative bg-white dark:bg-slate-800 border-2 rounded-lg shadow-md
                 ${selected ? 'border-blue-500 shadow-lg' : 'border-slate-300 dark:border-slate-600'}
                 ${isInitiating ? 'ring-2 ring-green-500 ring-offset-2' : ''}
+                ${hasValidationIssues ? 'ring-2 ring-yellow-500 ring-offset-1' : ''}
                 transition-all duration-200 min-w-[200px] ${nodeData.onClick ? 'cursor-pointer' : ''}
             `}
             onClick={() => {
@@ -200,6 +205,13 @@ const RuleNode: React.FC<NodeProps> = ({ data, isConnectable, selected, id }) =>
                 {isInitiating && (
                     <div className="text-xs text-green-600 dark:text-green-400 mt-1 font-medium">
                         Starting Rule
+                    </div>
+                )}
+                
+                {hasValidationIssues && (
+                    <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Missing required fields
                     </div>
                 )}
             </div>
@@ -539,6 +551,8 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
     
     // Track if we've auto-arranged for current chainData
     const [hasAutoArranged, setHasAutoArranged] = React.useState(false);
+    // Track if we need to center view on new chain data
+    const [shouldCenterView, setShouldCenterView] = React.useState(false);
     
     // Edit dialog state
     const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
@@ -807,6 +821,12 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             // Only reset auto-arrange flag if autoArrangeOnLoad is enabled
             setHasAutoArranged(false);
         }
+        
+        // Set flag to center view when new chain data is loaded
+        if (isNewChain && currentNodeCount > 0) {
+            setShouldCenterView(true);
+        }
+        
         prevNodeCountRef.current = currentNodeCount;
         prevChainDataRef.current = chainData;
         
@@ -837,7 +857,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 data: {
                     ...node,
                     label: node.label,
-                    ruleId: node.ruleId,
+                    ruleId: node.ruleId || (!isAction ? node.id : undefined), // Ensure ruleId is set for rule nodes
                     actionType: node.actionType,
                     expression: node.expression,
                     isInitiating: node.isInitiating,
@@ -1029,6 +1049,9 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 // Load the rule with all its children
                 await onLoadRuleWithChildren(selectedRuleId);
                 
+                // Center view after loading new rule chain
+                setShouldCenterView(true);
+                
                 toast.success(`Loaded rule chain for: ${selectedRuleId}`);
             } else {
                 // Fallback to single rule loading if onLoadRuleWithChildren is not provided
@@ -1051,7 +1074,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 const expression = exprProp?.value || "";
                 
                 // Create new node with fetched rule data
-                const newNodeId = `rule-${Date.now()}`;
+                const newNodeId = selectedRuleId; // Use the ruleId as the nodeId for consistency
                 const newNode: Node = {
                     id: newNodeId,
                     type: 'ruleNode',
@@ -1154,6 +1177,17 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [autoArrangeOnLoad, nodes.length, hasAutoArranged]); // handleAutoLayout excluded to prevent circular deps
     
+    // Center view when new chain data is loaded
+    React.useEffect(() => {
+        if (shouldCenterView && nodes.length > 0) {
+            // Small delay to ensure nodes are rendered
+            setTimeout(() => {
+                fitView({ padding: 0.2, duration: 400 });
+                setShouldCenterView(false);
+            }, 200);
+        }
+    }, [shouldCenterView, nodes.length, fitView]);
+    
     return (
         <NodeHandlersContext.Provider value={{ onEdit: handleNodeEdit, onDelete: handleNodeDelete }}>
             <div 
@@ -1202,7 +1236,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 panActivationKeyCode="Space" // Space + left click also pans
                 minZoom={0.1}
                 maxZoom={4}
-                defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+                defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
                 className="bg-slate-50 dark:bg-slate-900"
                 style={{ width: '100%', height: '100%' }}
             >
@@ -1698,19 +1732,39 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                         });
                                     }
                                     
-                                    // Update the edited node
-                                    updatedNodes[editingNode.id] = {
+                                    // Ensure the node ID matches the ruleId for rule nodes
+                                    const nodeKey = editingNode.ruleId || editingNode.id;
+                                    
+                                    // If the node ID changed, remove the old node
+                                    if (nodeKey !== editingNode.id && updatedNodes[editingNode.id]) {
+                                        delete updatedNodes[editingNode.id];
+                                    }
+                                    
+                                    // Update the edited node with the correct ID
+                                    updatedNodes[nodeKey] = {
                                         ...chainData.nodes[editingNode.id],
+                                        id: nodeKey, // Ensure ID matches ruleId
                                         label: editingNode.label,
-                                        ruleId: editingNode.ruleId,
+                                        ruleId: editingNode.ruleId || nodeKey, // Ensure ruleId is set
                                         expression: editingNode.expression,
                                         description: editingNode.description,
                                         isInitiating: editingNode.isInitiating
                                     };
                                     
+                                    // Update edges if the node ID changed
+                                    let updatedEdges = chainData.edges;
+                                    if (nodeKey !== editingNode.id) {
+                                        updatedEdges = chainData.edges.map(edge => ({
+                                            ...edge,
+                                            from: edge.from === editingNode.id ? nodeKey : edge.from,
+                                            to: edge.to === editingNode.id ? nodeKey : edge.to
+                                        }));
+                                    }
+                                    
                                     const updatedChainData = {
                                         ...chainData,
-                                        nodes: updatedNodes
+                                        nodes: updatedNodes,
+                                        edges: updatedEdges
                                     };
                                     onChainUpdate(updatedChainData);
                                     
@@ -1720,10 +1774,11 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                         if (node.id === editingNode.id) {
                                             return { 
                                                 ...node, 
+                                                id: nodeKey, // Update the node ID to match ruleId
                                                 data: { 
                                                     ...node.data, 
                                                     label: editingNode.label,
-                                                    ruleId: editingNode.ruleId,
+                                                    ruleId: editingNode.ruleId || nodeKey,
                                                     expression: editingNode.expression,
                                                     isInitiating: editingNode.isInitiating
                                                 } 
@@ -1741,6 +1796,15 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                         }
                                         return node;
                                     }));
+                                    
+                                    // Update React Flow edges if the node ID changed
+                                    if (nodeKey !== editingNode.id) {
+                                        setEdges((eds) => eds.map((edge) => ({
+                                            ...edge,
+                                            source: edge.source === editingNode.id ? nodeKey : edge.source,
+                                            target: edge.target === editingNode.id ? nodeKey : edge.target
+                                        })));
+                                    }
                                     
                                     // Show message if marked as initiating
                                     if (editingNode.isInitiating) {
@@ -1806,7 +1870,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                 // Create empty rule instead
                                 if (pendingRuleDropPosition) {
                                     const newRuleId = generateRuleId();
-                                    const newNodeId = `rule-${Date.now()}`;
+                                    const newNodeId = newRuleId; // Use the ruleId as the nodeId for consistency
                                     const newNode: Node = {
                                         id: newNodeId,
                                         type: 'ruleNode',
