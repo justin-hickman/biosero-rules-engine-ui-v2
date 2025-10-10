@@ -27,7 +27,7 @@ interface SampleListProps {
     isAutoRefresh?: boolean;
 }
 
-export function SampleList({
+export const SampleList = React.memo(function SampleList({
     rulesEngineUrl,
     selectedSampleId,
     onSampleSelect,
@@ -38,6 +38,8 @@ export function SampleList({
     
     const [samples, setSamples] = useState<WorkflowContext[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [isInitialLoad, setIsInitialLoad] = useState(true);
+    const [isUpdating, setIsUpdating] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'complete' | 'failed'>('all');
@@ -56,6 +58,31 @@ export function SampleList({
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['active', 'complete', 'failed']));
     const lastFetchTime = useRef<number>(0);
     const isFetching = useRef<boolean>(false);
+    
+    // Use refs for filter values to prevent fetchSamples from changing
+    const filterStatusRef = useRef(filterStatus);
+    const dateFilterRef = useRef(dateFilter);
+    const searchTermRef = useRef(searchTerm);
+    
+    // State to trigger re-filtering when filters change
+    const [filterTrigger, setFilterTrigger] = useState(0);
+    const lastSamplesRef = useRef<WorkflowContext[]>([]);
+    
+    // Update refs when values change and trigger re-filtering
+    useEffect(() => {
+        filterStatusRef.current = filterStatus;
+        setFilterTrigger(prev => prev + 1);
+    }, [filterStatus]);
+    
+    useEffect(() => {
+        dateFilterRef.current = dateFilter;
+        setFilterTrigger(prev => prev + 1);
+    }, [dateFilter]);
+    
+    useEffect(() => {
+        searchTermRef.current = searchTerm;
+        setFilterTrigger(prev => prev + 1);
+    }, [searchTerm]);
 
     const rulesEngineService = React.useMemo(
         () => new RulesEngineService(rulesEngineUrl),
@@ -75,14 +102,13 @@ export function SampleList({
         lastFetchTime.current = now;
         
         try {
-            console.log('🔍 Monitor: Fetching samples from BRE API...', {
-                rulesEngineUrl,
-                dateFilter,
-                filterStatus,
-                timestamp: new Date().toISOString()
-            });
-            
-            setIsLoading(true);
+            // Only show loading on initial load, not during auto-refresh
+            if (isInitialLoad) {
+                setIsLoading(true);
+            } else {
+                // Show subtle updating indicator for streaming effect
+                setIsUpdating(true);
+            }
             setError(null);
             
             // Use the new rich payload structure from /contexts/rulechains
@@ -92,10 +118,10 @@ export function SampleList({
                 isActive: true
             };
             
-            if (dateFilter) {
+            if (dateFilterRef.current) {
                 const endDate = new Date();
                 const startDate = new Date();
-                startDate.setDate(startDate.getDate() - dateFilter);
+                startDate.setDate(startDate.getDate() - dateFilterRef.current);
                 apiParams.startTimestamp = startDate.toISOString();
                 apiParams.endTimestamp = endDate.toISOString();
             }
@@ -160,31 +186,17 @@ export function SampleList({
                 const createSampleKey = (sample: WorkflowContext) => 
                     `${sample.sampleId}-${sample.status}-${sample.lastUpdatedAt}-${sample.chainId || 'no-chain'}`;
                 
-                setSamples(prevSamples => {
-                    // Quick length check first
-                    if (prevSamples.length !== newSamples.length) {
-                        console.log('✅ Monitor: Sample count changed:', {
-                            prev: prevSamples.length,
-                            new: newSamples.length
-                        });
-                        return newSamples;
-                    }
-                    
-                    // Create comparison keys
-                    const prevKeys = prevSamples.map(createSampleKey).sort();
-                    const newKeys = newSamples.map(createSampleKey).sort();
-                    
-                    // Check if any keys are different
-                    const hasChanged = prevKeys.some((key, index) => key !== newKeys[index]);
-                    
-                    if (hasChanged) {
-                        console.log('✅ Monitor: Sample data changed');
-                        return newSamples;
-                    } else {
-                        console.log('📊 Monitor: No changes detected, keeping existing samples');
-                        return prevSamples;
-                    }
-                });
+                // Additional deep comparison to prevent flickering
+                const newSamplesString = JSON.stringify(newSamples.map(createSampleKey).sort());
+                const lastSamplesString = lastSamplesRef.current.length > 0 ? 
+                    JSON.stringify(lastSamplesRef.current.map(createSampleKey).sort()) : null;
+                
+                if (newSamplesString !== lastSamplesString) {
+                    lastSamplesRef.current = newSamples;
+                    setSamples(newSamples);
+                } else {
+                    console.log('⏸️ Monitor: Sample data identical, skipping update');
+                }
             } else {
                 setSamples([]);
                 console.log('⚠️ Monitor: No samples found in database');
@@ -210,22 +222,25 @@ export function SampleList({
             }
         } finally {
             setIsLoading(false);
+            setIsUpdating(false);
+            setIsInitialLoad(false);
             isFetching.current = false;
         }
-    }, [rulesEngineService, dateFilter, filterStatus, rulesEngineUrl]);
+    }, [rulesEngineService]);
 
-    // Auto-refresh setup
+    // Streaming-style auto-refresh with intelligent polling
     useEffect(() => {
-        // Only fetch samples initially, not on every effect run
+        // Initial fetch
         if (isAutoRefresh) {
-        fetchSamples();
+            fetchSamples();
         }
 
         let interval: number | null = null;
         if (isAutoRefresh) {
+            // Use longer intervals for streaming effect - no more flickering
             interval = setInterval(() => {
                 fetchSamples();
-            }, refreshInterval);
+            }, refreshInterval * 1.5); // 1.5x the interval for responsive streaming
         }
 
         return () => {
@@ -233,30 +248,30 @@ export function SampleList({
                 clearInterval(interval);
             }
         };
-    }, [isAutoRefresh, refreshInterval, dateFilter]);
+    }, [isAutoRefresh, refreshInterval, fetchSamples]);
 
     // Group samples by status with proper filtering and stable references
     const groupedSamples = useMemo(() => {
         // Create a stable key for the current filter state
-        const filterKey = `${filterStatus}-${searchTerm}-${samples.length}`;
+        const filterKey = `${filterStatusRef.current}-${searchTermRef.current}-${samples.length}`;
 
         const filtered = samples.filter(sample => {
             // Status filter
-        if (filterStatus !== 'all') {
-                if (filterStatus === 'active' && sample.status !== ContextStatus.Active && sample.status !== ContextStatus.Running) {
+        if (filterStatusRef.current !== 'all') {
+                if (filterStatusRef.current === 'active' && sample.status !== ContextStatus.Active && sample.status !== ContextStatus.Running) {
                     return false;
                 }
-                if (filterStatus === 'complete' && sample.status !== ContextStatus.Complete) {
+                if (filterStatusRef.current === 'complete' && sample.status !== ContextStatus.Complete) {
                     return false;
                 }
-                if (filterStatus === 'failed' && sample.status !== ContextStatus.Failed) {
+                if (filterStatusRef.current === 'failed' && sample.status !== ContextStatus.Failed) {
                     return false;
                 }
             }
 
             // Search filter
-        if (searchTerm) {
-            const searchLower = searchTerm.toLowerCase();
+        if (searchTermRef.current) {
+            const searchLower = searchTermRef.current.toLowerCase();
                 return (
                 sample.sampleId?.toLowerCase().includes(searchLower) ||
                     sample.workflowContextId?.toLowerCase().includes(searchLower) ||
@@ -288,7 +303,7 @@ export function SampleList({
         }
 
         return result;
-    }, [samples, filterStatus, searchTerm]);
+    }, [samples, filterTrigger]);
 
     // Toggle group expansion
     const toggleGroup = useCallback((group: string) => {
@@ -566,12 +581,12 @@ export function SampleList({
                 </ScrollArea>
             )}
 
-            {/* Loading State */}
-            {isLoading && (
-                <div className="flex-1 flex items-center justify-center">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Loading samples...
+            {/* Subtle updating indicator for streaming effect */}
+            {isUpdating && (
+                <div className="absolute top-2 right-2 z-10">
+                    <div className="bg-primary/10 text-primary px-2 py-1 rounded-full text-xs flex items-center gap-1">
+                        <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+                        Updating...
                     </div>
                 </div>
             )}
@@ -608,4 +623,4 @@ export function SampleList({
                 )}
         </div>
     );
-}
+});

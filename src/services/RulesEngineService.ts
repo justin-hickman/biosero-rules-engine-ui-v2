@@ -177,7 +177,8 @@ export class RulesEngineService {
     // Get a display name for the context
     getContextDisplayName(context: WorkflowContext): string {
         if (context.sampleId) {
-            return `Sample ${context.sampleId}`;
+            // If sampleId already contains descriptive text, use it as-is
+            return context.sampleId;
         }
         if (context.batchId) {
             return `Batch ${context.batchId}`;
@@ -1051,6 +1052,98 @@ export class RulesEngineService {
         } catch (error) {
             console.error('Error evaluating chain:', error);
             return null;
+        }
+    }
+
+    // Get system diagnostics metrics
+    async getSystemMetrics(): Promise<any> {
+        try {
+            const response = await fetch(`${this.baseUrl}/diagnostics/metrics`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching system metrics:', error);
+            return null;
+        }
+    }
+
+    // Get rule statistics
+    async getRuleStats(): Promise<any> {
+        try {
+            const response = await fetch(`${this.baseUrl}/diagnostics/rulestats`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching rule stats:', error);
+            return null;
+        }
+    }
+
+    // Get active processing statistics
+    async getActiveProcessingStats(): Promise<any> {
+        try {
+            const response = await fetch(`${this.baseUrl}/diagnostics/active-processing`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching active processing stats:', error);
+            return null;
+        }
+    }
+
+    // Abort a running chain
+    async abortChain(chainId: string, reason?: string): Promise<boolean> {
+        try {
+            const body = reason ? { reason } : {};
+            const response = await fetch(`${this.baseUrl}/rules/evaluations/chains/${chainId}/abort`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json-patch+json',
+                    'accept': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Chain abort failed:', errorText);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Error aborting chain:', error);
+            return false;
+        }
+    }
+
+    // Reload rules from persistent store
+    async reloadRules(): Promise<{ success: boolean; message?: string; count?: number }> {
+        try {
+            const response = await fetch(`${this.baseUrl}/rules/actions/reload`, {
+                method: 'POST',
+                headers: {
+                    'accept': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Rules reload failed:', errorText);
+                return { success: false, message: errorText };
+            }
+
+            const result = await response.json();
+            return result;
+        } catch (error) {
+            console.error('Error reloading rules:', error);
+            return { success: false, message: 'Network error' };
         }
     }
 }

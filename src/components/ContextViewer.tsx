@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Progress } from '../components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { cn } from '../lib/utils';
 import {
     CaretDown,
@@ -17,7 +18,8 @@ import {
     Copy,
     Pulse,
     Info,
-    Warning
+    Warning,
+    Stop
 } from '@phosphor-icons/react';
 import { WorkflowContext, ChainContext, RulesEngineService } from '../services/RulesEngineService';
 import { toast } from 'sonner';
@@ -100,6 +102,29 @@ function TreeNode({ label, value, depth = 0 }: TreeNodeProps) {
 
 export function ContextViewer({ context, chainExecution, rulesEngineService }: ContextViewerProps) {
     const [activeTab, setActiveTab] = useState('overview');
+    const [systemMetrics, setSystemMetrics] = useState<any>(null);
+    const [ruleStats, setRuleStats] = useState<any>(null);
+    const [activeProcessing, setActiveProcessing] = useState<any>(null);
+    const [metricsLoading, setMetricsLoading] = useState(false);
+
+    // Load metrics when metrics tab is selected
+    React.useEffect(() => {
+        if (activeTab === 'metrics' && !systemMetrics && !metricsLoading) {
+            setMetricsLoading(true);
+            Promise.all([
+                rulesEngineService.getSystemMetrics(),
+                rulesEngineService.getRuleStats(),
+                rulesEngineService.getActiveProcessingStats()
+            ]).then(([metrics, stats, processing]) => {
+                setSystemMetrics(metrics);
+                setRuleStats(stats);
+                setActiveProcessing(processing);
+                setMetricsLoading(false);
+            }).catch(() => {
+                setMetricsLoading(false);
+            });
+        }
+    }, [activeTab, systemMetrics, metricsLoading, rulesEngineService]);
 
     if (!context) {
         return (
@@ -155,6 +180,27 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
         toast.success('Copied to clipboard');
     };
 
+    const handleAbortChain = async () => {
+        if (!chainExecution?.chainId) {
+            toast.error('No active chain to abort');
+            return;
+        }
+
+        const reason = prompt('Enter reason for aborting the chain (optional):');
+        if (reason === null) return; // User cancelled
+
+        try {
+            const success = await rulesEngineService.abortChain(chainExecution.chainId, reason || undefined);
+            if (success) {
+                toast.success('Chain aborted successfully');
+            } else {
+                toast.error('Failed to abort chain');
+            }
+        } catch (error) {
+            toast.error('Error aborting chain');
+        }
+    };
+
     // Calculate execution progress using enriched payload data
     const executionProgress = chainExecution ? {
         total: chainExecution.progress?.totalRules || chainExecution.rules?.length || 0,
@@ -178,27 +224,46 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
         <div className="h-full w-full flex flex-col bg-background overflow-hidden">
             {/* Header */}
             <div className="px-4 py-4 border-b flex-shrink-0">
-                <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-semibold">Context Details</h2>
-                    <div className="flex gap-2">
-                        <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={handleCopyJson}
-                            title="Copy JSON"
-                        >
-                            <Copy className="w-4 h-4" />
-                        </Button>
-                        <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={handleExportContext}
-                            title="Export context"
-                        >
-                            <Download className="w-4 h-4" />
-                        </Button>
+                <TooltipProvider>
+                    <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-lg font-semibold">Context Details</h2>
+                        <div className="flex gap-2">
+                            {chainExecution?.chainId && (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            onClick={handleAbortChain}
+                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                        >
+                                            <Stop className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p>Abort running chain execution</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                            )}
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={handleCopyJson}
+                                title="Copy JSON"
+                            >
+                                <Copy className="w-4 h-4" />
+                            </Button>
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={handleExportContext}
+                                title="Export context"
+                            >
+                                <Download className="w-4 h-4" />
+                            </Button>
+                        </div>
                     </div>
-                </div>
+                </TooltipProvider>
 
                 {/* Sample Info */}
                 <div className="space-y-2">
@@ -213,7 +278,12 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                                 context.status === 1 ? "default" :
                                 "outline"
                             }
-                            className="gap-1"
+                            className={`gap-1 ${
+                                context.status === 2 ? "bg-yellow-100 text-yellow-800 border-yellow-200" :
+                                context.status === 3 ? "bg-red-100 text-red-800 border-red-200" :
+                                context.status === 1 ? "bg-green-100 text-green-800 border-green-200" :
+                                "bg-gray-100 text-gray-800 border-gray-200"
+                            }`}
                         >
                             {statusInfo.icon === 'spinner' && <Pulse className="w-3 h-3 animate-pulse" />}
                             {statusInfo.label}
@@ -233,7 +303,14 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                                         <span className="text-muted-foreground">Progress</span>
                                         <span className="font-medium">{executionProgress.percentage.toFixed(1)}%</span>
                                     </div>
-                                    <Progress value={executionProgress.percentage} className="h-2" />
+                                    <Progress 
+                                        value={executionProgress.percentage} 
+                                        className={`h-2 ${
+                                            executionProgress.percentage === 100 
+                                                ? '[&>div]:bg-green-500' 
+                                                : '[&>div]:bg-blue-500'
+                                        }`} 
+                                    />
                                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                                         <span>{executionProgress.completed} / {executionProgress.total} rules</span>
                                         {executionProgress.estimatedCompletion && (
@@ -267,6 +344,7 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                     <TabsTrigger value="execution">
                         Execution {chainExecution && `(${(chainExecution.history || chainExecution.ruleStatusHistory || []).length})`}
                     </TabsTrigger>
+                    <TabsTrigger value="metrics">Metrics</TabsTrigger>
                     <TabsTrigger value="raw">Raw</TabsTrigger>
                 </TabsList>
 
@@ -274,45 +352,45 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                     <TabsContent value="overview" className="px-4 py-4 space-y-4">
                         {/* Context Info Card */}
                         <Card className="overflow-hidden">
-                            <CardHeader>
+                            <CardHeader className="pb-2">
                                 <CardTitle className="text-sm">Context Information</CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-3">
-                                <div className="space-y-2 text-sm">
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-muted-foreground text-xs">Context ID:</span>
-                                        <span className="font-mono text-xs break-all">{context.contextId}</span>
+                            <CardContent className="pt-0 pb-3">
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-muted-foreground text-xs font-medium">Context ID</span>
+                                        <span className="font-mono text-xs break-all text-right max-w-[180px]">{context.contextId}</span>
                                     </div>
                                     
                                     {context.orderId && (
-                                        <div className="flex flex-col gap-0.5">
-                                            <span className="text-muted-foreground text-xs">Order ID:</span>
-                                            <span className="text-sm break-all">{context.orderId}</span>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-muted-foreground text-xs font-medium">Order ID</span>
+                                            <span className="text-xs break-all text-right max-w-[180px]">{context.orderId}</span>
                                         </div>
                                     )}
                                     
                                     {context.batchId && (
-                                        <div className="flex flex-col gap-0.5">
-                                            <span className="text-muted-foreground text-xs">Batch ID:</span>
-                                            <span className="text-sm break-all">{context.batchId}</span>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-muted-foreground text-xs font-medium">Batch ID</span>
+                                            <span className="text-xs break-all text-right max-w-[180px]">{context.batchId}</span>
                                         </div>
                                     )}
                                     
                                     {context.sampleId && (
-                                        <div className="flex flex-col gap-0.5">
-                                            <span className="text-muted-foreground text-xs">Sample ID:</span>
-                                            <span className="text-sm break-all">{context.sampleId}</span>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-muted-foreground text-xs font-medium">Sample ID</span>
+                                            <span className="text-xs break-all text-right max-w-[180px]">{context.sampleId}</span>
                                         </div>
                                     )}
                                     
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-muted-foreground text-xs">Created:</span>
-                                        <span className="text-xs">{new Date(context.createdAt).toLocaleString()}</span>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-muted-foreground text-xs font-medium">Created</span>
+                                        <span className="text-xs text-right">{new Date(context.createdAt).toLocaleString()}</span>
                                     </div>
                                     
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-muted-foreground text-xs">Updated:</span>
-                                        <span className="text-xs">{new Date(context.lastUpdatedAt).toLocaleString()}</span>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-muted-foreground text-xs font-medium">Updated</span>
+                                        <span className="text-xs text-right">{new Date(context.lastUpdatedAt).toLocaleString()}</span>
                                     </div>
                                 </div>
                             </CardContent>
@@ -393,48 +471,6 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                             </Card>
                         )}
 
-                        {/* Key Variables Preview */}
-                        {Object.keys(variables).length > 0 && (
-                            <Card className="overflow-hidden">
-                                <CardHeader>
-                                    <CardTitle className="text-sm">Key Variables</CardTitle>
-                                    <CardDescription>
-                                        {Object.keys(variables).length} variable{Object.keys(variables).length !== 1 ? 's' : ''}
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent className="p-4">
-                                    <div className="space-y-2 w-full overflow-hidden">
-                                        {/* Show first 3 variables always */}
-                                        {Object.entries(variables)
-                                            .slice(0, 3)
-                                            .map(([key, value]) => (
-                                                <div key={key} className="text-sm w-full overflow-hidden">
-                                                    <TreeNode label={key} value={value} depth={0} />
-                                                </div>
-                                            ))}
-                                        
-                                        {/* Show rest as collapsible if more than 3 */}
-                                        {Object.keys(variables).length > 3 && (
-                                            <Collapsible>
-                                                <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                                                    <CaretRight className="w-3 h-3 transition-transform data-[state=open]:rotate-90" />
-                                                    Show {Object.keys(variables).length - 3} more variable{Object.keys(variables).length - 3 !== 1 ? 's' : ''}
-                                                </CollapsibleTrigger>
-                                                <CollapsibleContent className="mt-2 space-y-2">
-                                                    {Object.entries(variables)
-                                                        .slice(3)
-                                                        .map(([key, value]) => (
-                                                            <div key={key} className="text-sm w-full overflow-hidden">
-                                                                <TreeNode label={key} value={value} depth={0} />
-                                                            </div>
-                                                        ))}
-                                                </CollapsibleContent>
-                                            </Collapsible>
-                                        )}
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        )}
                     </TabsContent>
 
                     <TabsContent value="variables" className="px-4 py-4">
@@ -549,6 +585,163 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                                 </pre>
                             </CardContent>
                         </Card>
+                    </TabsContent>
+
+                    <TabsContent value="metrics" className="px-4 py-4 space-y-4">
+                        {metricsLoading ? (
+                            <div className="flex items-center justify-center py-8">
+                                <div className="text-center">
+                                    <Pulse className="w-8 h-8 mx-auto mb-2 animate-pulse text-muted-foreground" />
+                                    <p className="text-sm text-muted-foreground">Loading metrics...</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+
+                                {/* Rule Statistics */}
+                                {ruleStats?.stats && (
+                                    <Card className="overflow-hidden">
+                                        <CardHeader>
+                                            <CardTitle className="text-sm">Rule Statistics</CardTitle>
+                                            <CardDescription>Current rule landscape and configuration status</CardDescription>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="grid grid-cols-2 gap-4 text-center">
+                                                <div className="space-y-1">
+                                                    <p className="text-2xl font-bold text-blue-600">{ruleStats.stats.totalRules}</p>
+                                                    <p className="text-xs text-muted-foreground">Total Rules</p>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <p className="text-2xl font-bold text-green-600">{ruleStats.stats.activeRules}</p>
+                                                    <p className="text-xs text-muted-foreground">Active Rules</p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+
+                                {/* Active Processing */}
+                                {activeProcessing?.processingStats && (
+                                    <Card className="overflow-hidden">
+                                        <CardHeader>
+                                            <CardTitle className="text-sm">Active Processing</CardTitle>
+                                            <CardDescription>Real-time processing status and system load</CardDescription>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            <TooltipProvider>
+                                                {/* Sample Processing Status */}
+                                                <div className="space-y-2">
+                                                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Sample Processing</h4>
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="flex justify-between items-center cursor-help">
+                                                                    <span className="text-sm text-muted-foreground">Active Locks</span>
+                                                                    <span className="text-sm font-medium">{activeProcessing.processingStats.sampleProcessing.activeSampleLocks}</span>
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>Number of samples currently being processed</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="flex justify-between items-center cursor-help">
+                                                                    <span className="text-sm text-muted-foreground">Event Queue</span>
+                                                                    <span className="text-sm font-medium">{activeProcessing.processingStats.sampleProcessing.eventQueueSize}</span>
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>Number of pending events waiting to be processed</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </div>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <div className="flex justify-between items-center cursor-help">
+                                                                <span className="text-sm text-muted-foreground">Status</span>
+                                                                <Badge variant={activeProcessing.processingStats.sampleProcessing.status === 'Available' ? 'default' : 'secondary'}>
+                                                                    {activeProcessing.processingStats.sampleProcessing.status}
+                                                                </Badge>
+                                                            </div>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>
+                                                            <p>Current processing system status</p>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </div>
+
+                                                {/* System Resources */}
+                                                <div className="space-y-2">
+                                                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">System Resources</h4>
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="flex justify-between items-center cursor-help">
+                                                                    <span className="text-sm text-muted-foreground">Memory (MB)</span>
+                                                                    <span className="text-sm font-medium">{Math.round(activeProcessing.processingStats.systemMetrics.workingSetBytes / 1024 / 1024)}</span>
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>Current memory usage of the Rules Engine process</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="flex justify-between items-center cursor-help">
+                                                                    <span className="text-sm text-muted-foreground">Threads</span>
+                                                                    <span className="text-sm font-medium">{activeProcessing.processingStats.systemMetrics.cpuMetrics.threadCount}</span>
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>Number of active threads in the Rules Engine process</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="flex justify-between items-center cursor-help">
+                                                                    <span className="text-sm text-muted-foreground">CPU Time (s)</span>
+                                                                    <span className="text-sm font-medium">{Math.round(activeProcessing.processingStats.systemMetrics.cpuMetrics.totalProcessorTimeMs / 1000)}</span>
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>Total CPU time consumed by the Rules Engine process</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="flex justify-between items-center cursor-help">
+                                                                    <span className="text-sm text-muted-foreground">Uptime (h)</span>
+                                                                    <span className="text-sm font-medium">{Math.round(activeProcessing.processingStats.systemMetrics.cpuMetrics.uptimeMs / 1000 / 60 / 60)}</span>
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>How long the Rules Engine has been running</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </div>
+                                                </div>
+                                            </TooltipProvider>
+                                        </CardContent>
+                                    </Card>
+                                )}
+
+                                {/* Error State */}
+                                {!ruleStats && !activeProcessing && !metricsLoading && (
+                                    <Card className="overflow-hidden">
+                                        <CardContent className="flex items-center justify-center py-8">
+                                            <div className="text-center">
+                                                <Warning className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+                                                <p className="text-sm text-muted-foreground">Unable to load metrics</p>
+                                                <p className="text-xs text-muted-foreground mt-1">Check if the Rules Engine is running</p>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+                            </>
+                        )}
                     </TabsContent>
                 </ScrollArea>
             </Tabs>

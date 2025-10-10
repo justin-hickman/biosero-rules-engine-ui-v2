@@ -28,7 +28,7 @@ interface SampleMonitorProps {
     isAutoRefresh?: boolean;
 }
 
-export function SampleMonitor({ 
+export const SampleMonitor = React.memo(function SampleMonitor({ 
     rulesEngineUrl, 
     dataServicesUrl,
     chainData,
@@ -39,6 +39,7 @@ export function SampleMonitor({
     const [chainExecution, setChainExecution] = useState<ChainContext | null>(null);
     const [dynamicChainData, setDynamicChainData] = useState<ChainData | null>(null);
     const [isLoadingChain, setIsLoadingChain] = useState(false);
+    const [isInitialChainLoad, setIsInitialChainLoad] = useState(true);
     const [pollingInterval, setPollingInterval] = useState<number | null>(null);
     const lastChainUpdate = React.useRef<number>(0);
     const [selectedNodeDetails, setSelectedNodeDetails] = useState<{
@@ -56,6 +57,7 @@ export function SampleMonitor({
     const [ruleExpressions, setRuleExpressions] = useState<Record<string, string>>({});
     const [currentAutoRefresh, setCurrentAutoRefresh] = useState(isAutoRefresh);
     const lastStableDataRef = React.useRef<string | null>(null);
+    const lastChainDataRef = React.useRef<ChainData | null>(null);
     
     // Handle auto-refresh state changes from SampleList
     const handleAutoRefreshChange = useCallback((isAutoRefresh: boolean) => {
@@ -71,17 +73,6 @@ export function SampleMonitor({
     const stableChainData = React.useMemo(() => {
         const currentData = dynamicChainData || fullChainData || chainData;
         
-        // Debug: Log which data source is being used
-        console.log('🔍 Monitor: Chain data priority check:', {
-            hasDynamicChainData: !!dynamicChainData,
-            hasFullChainData: !!fullChainData,
-            hasChainData: !!chainData,
-            dynamicNodeCount: dynamicChainData ? Object.keys(dynamicChainData.nodes || {}).length : 0,
-            fullNodeCount: fullChainData ? Object.keys(fullChainData.nodes || {}).length : 0,
-            chainNodeCount: chainData ? Object.keys(chainData.nodes || {}).length : 0,
-            usingSource: dynamicChainData ? 'dynamicChainData' : fullChainData ? 'fullChainData' : 'chainData'
-        });
-        
         // Create a stable reference that only changes when the actual content changes
         if (!currentData) return null;
         
@@ -93,6 +84,7 @@ export function SampleMonitor({
             edgeKeys: (currentData.edges || []).map(e => `${e.from}-${e.to}-${e.type}`).sort()
         });
         
+        // Return the current data with a stable key
         return {
             ...currentData,
             _stableKey: dataKey
@@ -404,7 +396,10 @@ export function SampleMonitor({
 
     // Fetch chain execution details using the new rich payload structure
     const fetchChainExecution = useCallback(async (context: WorkflowContext) => {
-        setIsLoadingChain(true);
+        // Only show loading on initial load, not during auto-refresh
+        if (isInitialChainLoad) {
+            setIsLoadingChain(true);
+        }
         try {
             console.log('🔍 Monitor: Fetching chain execution for context:', {
                 contextId: context.contextId,
@@ -441,7 +436,17 @@ export function SampleMonitor({
                     historyLength: chainContext.ruleStatusHistory?.length || 0
                 });
                 
-                    setChainExecution(chainContext);
+                // Only update chainExecution if it has actually changed
+                setChainExecution(prevExecution => {
+                    if (!prevExecution || 
+                        prevExecution.chainId !== chainContext.chainId ||
+                        prevExecution.status !== chainContext.status ||
+                        prevExecution.isActive !== chainContext.isActive ||
+                        prevExecution.isComplete !== chainContext.isComplete) {
+                        return chainContext;
+                    }
+                    return prevExecution;
+                });
                 
                 // Build full chain from starting rule using payload data
                 if (chainContext.initialRuleName) {
@@ -460,22 +465,29 @@ export function SampleMonitor({
                     edgeKeys: (chainData.edges || []).map(e => `${e.from}-${e.to}-${e.type}`).sort()
                 });
                 
-                // Only update if auto-refresh is enabled and data has actually changed
-                if (currentAutoRefresh && lastStableDataRef.current !== chainDataKey) {
+                // Only update if data has actually changed
+                if (lastStableDataRef.current !== chainDataKey) {
                     // Debounce chain data updates to prevent flickering
                     const now = Date.now();
-                    if (now - lastChainUpdate.current > 3000) { // 3 second debounce
+                    if (now - lastChainUpdate.current > 5000) { // 5 second debounce for responsive streaming
                         lastChainUpdate.current = now;
                         lastStableDataRef.current = chainDataKey;
                         
                         console.log('🔄 Monitor: Updating dynamic chain data with new content');
-                        setDynamicChainData(chainData);
-                } else {
+                        // Additional deep comparison to prevent flickering
+                        const chainDataString = JSON.stringify(chainData);
+                        const lastDataString = lastChainDataRef.current ? JSON.stringify(lastChainDataRef.current) : null;
+                        
+                        if (chainDataString !== lastDataString) {
+                            lastChainDataRef.current = chainData;
+                            setDynamicChainData(chainData);
+                        } else {
+                            console.log('⏸️ Monitor: Chain data identical, skipping update');
+                        }
+                    } else {
                         console.log('⏸️ Monitor: Skipping chain data update (debounced)');
-                }
-                } else if (!currentAutoRefresh) {
-                    console.log('⏸️ Monitor: Skipping chain data update (auto-refresh disabled)');
-            } else {
+                    }
+                } else {
                     console.log('⏸️ Monitor: Skipping chain data update (no content changes)');
                 }
                 
@@ -500,6 +512,7 @@ export function SampleMonitor({
             console.log('❌ Monitor: Failed to load execution chain. Please try again.');
         } finally {
             setIsLoadingChain(false);
+            setIsInitialChainLoad(false);
         }
     }, [rulesEngineService, buildFullChain, buildChainDataFromPayload]);
 
@@ -836,7 +849,7 @@ export function SampleMonitor({
         console.log(`📊 Monitor: Showing execution details for ${nodeId}`);
     }, [chainExecution, ruleExpressions]);
 
-    // Set up polling for active samples
+    // Set up polling for active samples with optimized change detection
     useEffect(() => {
         // Clear existing interval
         if (pollingInterval) {
@@ -849,22 +862,18 @@ export function SampleMonitor({
         // Check if we should poll (only if auto-refresh is enabled and chain is active)
         const shouldPoll = currentAutoRefresh && !chainExecution.isComplete && chainExecution.isActive;
         
-        console.log('🔄 Monitor: Polling check:', {
-            currentAutoRefresh,
-            isComplete: chainExecution.isComplete,
-            isActive: chainExecution.isActive,
-            shouldPoll
-        });
-
         if (shouldPoll) {
             const interval = setInterval(async () => {
                 try {
-                    // Fetch updated chain execution directly
-                    await fetchChainExecution(selectedContext);
+                    // Only fetch if we haven't updated recently to prevent excessive API calls
+                    const now = Date.now();
+                    if (now - lastChainUpdate.current > 3000) { // 3 second minimum between updates
+                        await fetchChainExecution(selectedContext);
+                    }
                 } catch (error) {
                     console.error('Polling error:', error);
                 }
-            }, 2000); // Poll every 2 seconds
+            }, 8000); // Poll every 8 seconds for responsive streaming
 
             setPollingInterval(interval);
         }
@@ -874,7 +883,7 @@ export function SampleMonitor({
                 clearInterval(pollingInterval);
             }
         };
-    }, [selectedContext, chainExecution?.isActive, chainExecution?.isComplete, currentAutoRefresh]);
+    }, [selectedContext, chainExecution?.isActive, chainExecution?.isComplete, currentAutoRefresh, fetchChainExecution]);
 
     return (
         <div className="fixed inset-0 top-14 bg-background">
@@ -892,24 +901,7 @@ export function SampleMonitor({
 
                 {/* Chain Visualization - Flexible center */}
                 <div className="flex-1 min-w-[600px] bg-muted/5 h-full relative overflow-hidden">
-                {isLoadingChain && (
-                    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-10 flex items-center justify-center">
-                        <div className="text-center bg-card p-6 rounded-lg shadow-lg border max-w-sm">
-                            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mx-auto mb-3"></div>
-                            <p className="text-sm font-medium">Searching for execution chain...</p>
-                            {selectedContext && (
-                                <div className="mt-2 space-y-1">
-                                    <p className="text-xs text-muted-foreground">
-                                        Looking for chain associated with {rulesEngineService.getContextDisplayName(selectedContext)}
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">
-                                        This may take a moment as we search through recent chains...
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
+                {/* Loading indicator removed to prevent flickering */}
                 
                 {!selectedContext ? (
                     <div className="h-full flex items-center justify-center p-8">
@@ -1191,4 +1183,4 @@ export function SampleMonitor({
             </Dialog>
         </div>
     );
-}
+});

@@ -42,7 +42,8 @@ import {
     Download,
     Sun,
     Moon,
-    Monitor
+    Monitor,
+    ArrowClockwise
 } from "@phosphor-icons/react";
 import { toast } from 'sonner';
 
@@ -4161,6 +4162,39 @@ function App() {
         }
     };
 
+    // Reload rules handler
+    const handleReloadRules = async () => {
+        if (!rulesEngineRootURI) {
+            toast.error('Rules Engine URL not configured');
+            return;
+        }
+
+        try {
+            const response = await fetch(`${rulesEngineRootURI}/rules/actions/reload`, {
+                method: 'POST',
+                headers: {
+                    'accept': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                toast.error(`Failed to reload rules: ${errorText}`);
+                return;
+            }
+
+            const result = await response.json();
+            if (result.success) {
+                toast.success(result.message || `Successfully reloaded ${result.count} rules`);
+            } else {
+                toast.error(result.message || 'Failed to reload rules');
+            }
+        } catch (error: any) {
+            console.error('Error reloading rules:', error);
+            toast.error('Network error: Could not connect to Rules Engine');
+        }
+    };
+
     const handleDataServicesHealthCheck = async () => {
         if (!dataServicesRootURI) {
             setDataServicesHealthStatus('error');
@@ -5702,6 +5736,15 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                     
                                     {/* Action Buttons */}
                                     <div className="flex gap-2 flex-1 justify-end">
+                                        <Button 
+                                            onClick={handleReloadRules}
+                                            size="sm"
+                                            className="text-foreground bg-blue-600 hover:bg-blue-700"
+                                            title="Refresh the Rules Engine's in-memory cache by reloading all rule definitions from the persistent store. This ensures any changes made directly to the database are reflected in new evaluations without restarting the service."
+                                        >
+                                            <ArrowClockwise className="w-4 h-4 mr-1" />
+                                            Reload Rules
+                                        </Button>
                                         <Button 
                                             onClick={() => {
                                                 setRuleChainData({ nodes: {}, edges: [] });
