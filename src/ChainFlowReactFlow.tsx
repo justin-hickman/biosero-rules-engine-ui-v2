@@ -813,24 +813,18 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             return;
         }
         
-        // Check if we should auto-arrange based on the shouldAutoArrange prop
-        // This allows the parent to control when auto-arrange should happen
+        // Only auto-arrange when explicitly requested via shouldAutoArrange prop
+        // This prevents auto-arrange on manual node additions
         if (shouldAutoArrange && autoArrangeOnLoad) {
             // Reset auto-arrange flag when explicitly requested
             setHasAutoArranged(false);
         }
         
-        // Also check for significant chain changes (fallback)
-        const isNewChain = (prevNodeCountRef.current === 0 && currentNodeCount > 0) || 
-                          (prevNodeCountRef.current > 0 && currentNodeCount === 0) ||
-                          (Math.abs(currentNodeCount - prevNodeCountRef.current) > 5);
-        if (isNewChain && autoArrangeOnLoad && !shouldAutoArrange) {
-            // Only auto-arrange for significant changes if not explicitly controlled
-            setHasAutoArranged(false);
-        }
+        // Disable fallback auto-arrange logic to prevent unwanted triggering
+        // Only use shouldAutoArrange prop for control
         
-        // Set flag to center view when new chain data is loaded
-        if (isNewChain && currentNodeCount > 0) {
+        // Only center view when explicitly requested via shouldAutoArrange prop
+        if (shouldAutoArrange && currentNodeCount > 0) {
             setShouldCenterView(true);
         }
         
@@ -1173,9 +1167,9 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
         toast.success('Layout arranged!');
     }, [nodes, edges, fitView, chainData, onChainUpdate]);
     
-    // Auto-arrange ONLY on initial load if requested
+    // Auto-arrange ONLY when explicitly requested via shouldAutoArrange prop
     React.useEffect(() => {
-        if (autoArrangeOnLoad && nodes.length > 0 && !hasAutoArranged) {
+        if (shouldAutoArrange && autoArrangeOnLoad && nodes.length > 0 && !hasAutoArranged) {
             // Small delay to ensure nodes are rendered
             setTimeout(() => {
                 handleAutoLayout();
@@ -1183,7 +1177,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             }, 100);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [autoArrangeOnLoad, nodes.length, hasAutoArranged]); // handleAutoLayout excluded to prevent circular deps
+    }, [shouldAutoArrange, autoArrangeOnLoad, nodes.length, hasAutoArranged]); // handleAutoLayout excluded to prevent circular deps
     
     // Center view when new chain data is loaded
     React.useEffect(() => {

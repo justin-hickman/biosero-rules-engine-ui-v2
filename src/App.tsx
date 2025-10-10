@@ -4955,7 +4955,7 @@ function App() {
             setChainStartRuleId(initiatingNode.ruleId);
         }
         
-        // Reset auto-arrange flag after chain update (manual changes shouldn't auto-arrange)
+        // Ensure auto-arrange is disabled for manual changes
         setShouldAutoArrange(false);
         
         toast.info('Chain updated (unsaved)');
