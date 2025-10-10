@@ -3,7 +3,6 @@ import {
     ReactFlow,
     Node,
     Edge,
-    Controls,
     Background,
     useNodesState,
     useEdgesState,
@@ -1188,6 +1187,18 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
         }
     }, [shouldCenterView, nodes.length, fitView]);
     
+    // Listen for external center view events
+    React.useEffect(() => {
+        const handleCenterView = () => {
+            if (nodes.length > 0) {
+                fitView({ padding: 0.2, duration: 400 });
+            }
+        };
+        
+        window.addEventListener('centerView', handleCenterView);
+        return () => window.removeEventListener('centerView', handleCenterView);
+    }, [fitView, nodes.length]);
+    
     return (
         <NodeHandlersContext.Provider value={{ onEdit: handleNodeEdit, onDelete: handleNodeDelete }}>
             <div 
@@ -1241,10 +1252,6 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 style={{ width: '100%', height: '100%' }}
             >
                 <Background color="#94a3b8" gap={16} />
-                <Controls 
-                    showInteractive={false}
-                    className="!bg-white dark:!bg-slate-800 !border-slate-200 dark:!border-slate-700 !shadow-sm"
-                />
             </ReactFlow>
             
             {/* Instructions when empty */}
@@ -1364,7 +1371,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             {/* Action Edit Dialog */}
             {isEditDialogOpen && editingNode && editingNodeType === 'action' && (
                 <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                    <DialogContent className="w-[95vw] max-w-[1400px] max-h-[85vh] overflow-y-auto">
+                    <DialogContent className="!w-[728px] max-h-[85vh] overflow-y-auto" style={{ width: '728px', maxWidth: '728px' }}>
                         <DialogHeader>
                             <DialogTitle>Edit Action Node</DialogTitle>
                             <DialogDescription>
@@ -1388,13 +1395,31 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                             
                             <div>
                                 <Label>Action Type</Label>
-                                <div className="p-2 bg-muted rounded-md text-sm">
-                                    {editingNode.actionType === "ExecuteOrchestratorWorkflowAction" 
-                                        ? "Execute Workflow" 
-                                        : editingNode.actionType === "ExecuteGbgSchedulerProcessAction"
-                                        ? "Execute Scheduler Process"
-                                        : editingNode.actionType || "Unknown Action"}
-                                </div>
+                                <Select
+                                    value={editingNode.actionType || "none"}
+                                    onValueChange={(value) => {
+                                        if (value === "none") return;
+                                        
+                                        // Reset template-related fields when changing action type
+                                        setEditingNode({
+                                            ...editingNode,
+                                            actionType: value,
+                                            templateName: "",
+                                            inputParameters: {},
+                                            outputParameters: {}
+                                        });
+                                    }}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select Action Type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">-- Select Action Type --</SelectItem>
+                                        <SelectItem value="RuleEvaluationAction">Rule Evaluation</SelectItem>
+                                        <SelectItem value="ExecuteOrchestratorWorkflowAction">Execute Orchestrator Workflow</SelectItem>
+                                        <SelectItem value="ExecuteGbgSchedulerProcessAction">Execute GBG Scheduler Process</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
                             
                             {/* Template Selection for Workflow and Scheduler Actions */}
@@ -1628,7 +1653,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             {/* Rule Edit Dialog */}
             {isEditDialogOpen && editingNode && editingNodeType === 'rule' && (
                 <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                    <DialogContent className="w-[85vw] max-w-[1000px]">
+                    <DialogContent className="!w-[637px]" style={{ width: '637px', maxWidth: '637px' }}>
                         <DialogHeader>
                             <DialogTitle>Edit Rule Node</DialogTitle>
                             <DialogDescription>

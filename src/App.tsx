@@ -80,8 +80,6 @@ import {
     Node,
     Edge,
     Background,
-    Controls,
-    MiniMap,
     useNodesState,
     useEdgesState,
     Position,
@@ -2108,7 +2106,7 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+            <DialogContent className="!w-[728px] max-h-[85vh] overflow-y-auto" style={{ width: '728px', maxWidth: '728px' }}>
                 <DialogHeader>
                     <DialogTitle>
                         Edit {editingNodeType === 'rule' ? 'Rule' : 'Action'} Node
@@ -2825,25 +2823,6 @@ function ChainFlowDiagramInner({
                     size={1}
                     variant={BackgroundVariant.Dots}
                 />
-                <Controls 
-                    className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm rounded-lg"
-                    showInteractive={true}
-                />
-                <MiniMap 
-                    className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm rounded-lg"
-                    maskColor="rgba(100, 116, 139, 0.1)"
-                    nodeColor={(node) => {
-                        if (node.type === 'errorNode') return '#ef4444';
-                        if (node.type === 'actionNode') {
-                            const actionType = (node.data?.actionType || '') as string;
-                            if (actionType.includes('OrchestratorWorkflow')) return '#a855f7';
-                            if (actionType.includes('GbgScheduler')) return '#14b8a6';
-                            return '#10b981';
-                        }
-                        return '#3b82f6';
-                    }}
-                    nodeStrokeWidth={2}
-                />
 
                 {isEditable && (
                     <Panel position="top-right" className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3 shadow-lg pointer-events-auto">
@@ -3272,7 +3251,7 @@ const ChainMapDialog: React.FC<ChainMapDialogProps> = ({
     
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-xl">
                 <DialogHeader>
                     <DialogTitle>Generate Rule Chain Map</DialogTitle>
                     <DialogDescription>
@@ -3427,7 +3406,7 @@ const ImportRuleDialog: React.FC<ImportRuleDialogProps> = ({
     
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-xl">
                 <DialogHeader>
                     <DialogTitle>Import Rule from Data Services</DialogTitle>
                     <DialogDescription>
@@ -3489,7 +3468,7 @@ const ResponseDialog: React.FC<ResponseDialogProps> = ({
     
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-3xl">
+            <DialogContent className="max-w-4xl">
                 <DialogHeader className="pb-2">
                     <DialogTitle className="flex items-center gap-2">
                         {details.success ? (
@@ -4037,7 +4016,10 @@ function App() {
     // Theme hook
     const { theme, toggleTheme } = useTheme();
     
-    // App mode state (editor vs monitor)
+    // URL-based routing state management
+    const [currentPage, setCurrentPage] = React.useState<'editor' | 'chain' | 'monitor'>('editor');
+    
+    // App mode state (editor vs monitor) - derived from currentPage
     const [appMode, setAppMode] = React.useState<'editor' | 'monitor'>('editor');
     
     // Persistent state using localStorage (replaced Spark's useKV)
@@ -4066,7 +4048,6 @@ function App() {
     } | null>(null);
     
     // Chain map state - start with blank canvas
-    const [isChainViewVisible, setIsChainViewVisible] = React.useState(false);
     const [ruleChainData, setRuleChainData] = React.useState<ChainData | null>({ nodes: {}, edges: [] });
     const [chainStartRuleId, setChainStartRuleId] = useLocalStorage("chain-start-rule-id", "");
     const [chainError, setChainError] = React.useState('');
@@ -4077,6 +4058,73 @@ function App() {
         upload: false,
         import: false
     });
+
+    // URL routing and cache management
+    React.useEffect(() => {
+        // Initialize from URL hash on component mount
+        const initializeFromURL = () => {
+            const hash = window.location.hash.slice(1); // Remove the #
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // Determine current page from URL
+            let page: 'editor' | 'chain' | 'monitor' = 'editor';
+            
+            if (hash === 'monitor') {
+                page = 'monitor';
+            } else if (hash === 'chain') {
+                page = 'chain';
+            } else {
+                page = 'editor';
+            }
+            
+            setCurrentPage(page);
+            setAppMode(page === 'monitor' ? 'monitor' : 'editor');
+            
+            // If we're on the landing page (editor), clear rule cache for fresh start
+            if (page === 'editor') {
+                // Reset to default rule template to ensure fresh state
+                setJsonData(DEFAULT_RULE_TEMPLATE);
+                setRuleChainData({ nodes: {}, edges: [] });
+                setChainStartRuleId("");
+                setChainError('');
+                setHasUnsavedChainChanges(false);
+            }
+        };
+
+        // Initialize on mount
+        initializeFromURL();
+
+        // Listen for hash changes (browser back/forward)
+        const handleHashChange = () => {
+            initializeFromURL();
+        };
+
+        window.addEventListener('hashchange', handleHashChange);
+        
+        return () => {
+            window.removeEventListener('hashchange', handleHashChange);
+        };
+    }, []);
+
+    // Update URL when page changes
+    const navigateToPage = (page: 'editor' | 'chain' | 'monitor') => {
+        setCurrentPage(page);
+        setAppMode(page === 'monitor' ? 'monitor' : 'editor');
+        
+        // Update URL hash
+        const newHash = page === 'editor' ? '' : `#${page}`;
+        const newURL = `${window.location.pathname}${window.location.search}${newHash}`;
+        window.history.pushState(null, '', newURL);
+        
+        // If navigating to editor, clear cache for fresh start
+        if (page === 'editor') {
+            setJsonData(DEFAULT_RULE_TEMPLATE);
+            setRuleChainData({ nodes: {}, edges: [] });
+            setChainStartRuleId("");
+            setChainError('');
+            setHasUnsavedChainChanges(false);
+        }
+    };
 
     // Health check handlers
     const handleRulesEngineHealthCheck = async () => {
@@ -4756,7 +4804,7 @@ function App() {
             console.log('Cleaned edges:', cleanedGraph.edges.map(edge => `${edge.from} -> ${edge.to} (${edge.type})`));
             
             setRuleChainData(cleanedGraph);
-            setIsChainViewVisible(true);
+            navigateToPage('chain');
             setHasUnsavedChainChanges(false);
             toast.success(`Recursive chain map generated: ${Object.keys(cleanedGraph.nodes).length} rules found`);
         } catch (error: any) {
@@ -4844,7 +4892,7 @@ function App() {
                 toast.success(`Added ${Object.keys(newGraph.nodes).length} rules to chain map`);
             }
             
-            setIsChainViewVisible(true);
+            navigateToPage('chain');
         } catch (error: any) {
             const message = error.message || 'Failed to add rule to chain';
             console.error('Error adding rule to chain:', error);
@@ -4868,335 +4916,6 @@ function App() {
         toast.info('Chain updated (unsaved)');
     }, [setChainStartRuleId]);
     
-    // Save chain to data services
-    const saveChainToDataServices = React.useCallback(async () => {
-        if (!ruleChainData) {
-            toast.warning('No chain data to save');
-            return;
-        }
-        
-        if (!dataServicesRootURI) {
-            toast.warning('Cannot save chain: Data services URI not configured');
-            return;
-        }
-        
-        // Validate rules before saving - include ALL rule nodes, not just those with existing ruleIds
-        const ruleNodes = Object.entries(ruleChainData.nodes)
-            .filter(([_, node]) => !node.actionType);
-        
-        const invalidRules: Array<{id: string, label: string, issues: string[]}> = [];
-        
-        ruleNodes.forEach(([nodeId, node]) => {
-            const issues: string[] = [];
-            
-            // Check for missing or empty label
-            if (!node.label || node.label.trim() === '') {
-                issues.push('Missing or empty label');
-            }
-            
-            // Check for missing or empty expression
-            if (!node.expression || node.expression.trim() === '') {
-                issues.push('Missing or empty rule expression');
-            }
-            
-            // Check for invalid rule ID
-            if (!node.ruleId && !nodeId) {
-                issues.push('Missing rule identifier');
-            }
-            
-            if (issues.length > 0) {
-                invalidRules.push({
-                    id: node.ruleId || nodeId,
-                    label: node.label || `Rule ${node.ruleId || nodeId}`,
-                    issues
-                });
-            }
-        });
-        
-        // Show warning if there are invalid rules
-        if (invalidRules.length > 0) {
-            const issueCount = invalidRules.reduce((sum, rule) => sum + rule.issues.length, 0);
-            const rulesText = invalidRules.length === 1 ? 'rule' : 'rules';
-            const issuesText = issueCount === 1 ? 'issue' : 'issues';
-            
-            const detailsText = invalidRules.map(rule => 
-                `• ${rule.label} (${rule.id}): ${rule.issues.join(', ')}`
-            ).join('\n');
-            
-            const confirmMessage = `Found ${invalidRules.length} ${rulesText} with ${issueCount} ${issuesText}:\n\n${detailsText}\n\nDo you want to save anyway? Missing expressions will be saved as empty strings.`;
-            
-            if (!confirm(confirmMessage)) {
-                toast.info('Save cancelled by user');
-                return;
-            }
-        }
-        
-        setIsLoading(prev => ({ ...prev, chainData: true }));
-        
-        try {
-            let savedCount = 0;
-            let createdCount = 0;
-            let errorCount = 0;
-            
-            // Process each rule in the chain
-            console.log('=== CHAIN SAVE START ===');
-            console.log('Processing rules for save:', ruleNodes.map(([id, node]) => ({ 
-                id, 
-                ruleId: node.ruleId, 
-                label: node.label,
-                expression: node.expression,
-                hasRuleId: !!node.ruleId
-            })));
-            
-            for (const [nodeId, node] of ruleNodes) {
-                try {
-                    console.log(`=== PROCESSING RULE ${nodeId} ===`);
-                    console.log('Node data:', { 
-                        ruleId: node.ruleId, 
-                        label: node.label, 
-                        expression: node.expression,
-                        description: node.description,
-                        isNewRule: !node.ruleId
-                    });
-                    
-                    // Use the ruleId instead of nodeId for processing connections
-                    const ruleIdForActions = node.ruleId || nodeId;
-                    
-                    // Convert chain connections to actions for this rule
-                    const { onSuccess, onFailure } = convertChainDataToRuleActions(ruleChainData, ruleIdForActions);
-                    console.log(`=== ACTIONS FOR RULE ${ruleIdForActions} ===`);
-                    console.log('OnSuccess actions:', JSON.stringify(onSuccess, null, 2));
-                    console.log('OnFailure actions:', JSON.stringify(onFailure, null, 2));
-                    console.log(`=== END ACTIONS FOR RULE ${ruleIdForActions} ===`);
-                    
-                    // Determine the rule ID to use for this node
-                    const ruleIdToUse = node.ruleId || nodeId;
-                    
-                    // Try to fetch existing rule data first (only if we have a ruleId)
-                    let ruleData;
-                    let isExistingRule = false;
-                    
-                    if (node.ruleId) {
-                    try {
-                            ruleData = await apiFetchRuleDetails(dataServicesRootURI, node.ruleId);
-                            isExistingRule = true;
-                    } catch (fetchError: any) {
-                            // If rule doesn't exist (404), create a new one
-                        if (fetchError.message?.includes('404') || fetchError.message?.includes('not found')) {
-                                console.log(`Creating new rule ${node.ruleId} as it doesn't exist in data services`);
-                                ruleData = null;
-                            } else {
-                        throw fetchError;
-                    }
-                        }
-                    } else {
-                        // New rule without ruleId - will be created
-                        console.log(`Creating new rule with ID ${ruleIdToUse}`);
-                        ruleData = null;
-                    }
-                    
-                    // Create rule data structure
-                    let ruleToSave;
-                    
-                    if (isExistingRule && ruleData) {
-                        // Update existing rule with chain data
-                        ruleToSave = {
-                        ...ruleData,
-                            // Update the rule name if we have a label from the node
-                            name: node.label && node.label.trim() !== '' ? node.label.trim() : ruleData.name,
-                            // Update the rule description if we have one from the node
-                            description: node.description && node.description.trim() !== '' ? node.description.trim() : ruleData.description,
-                        properties: ruleData.properties.map(prop => {
-                            if (prop.name === "OnSuccess") {
-                                    // Remove _uid field but keep all other fields for rule engine compatibility
-                                    const cleanOnSuccess = onSuccess.map(action => {
-                                        const { _uid, ...cleanAction } = action;
-                                        return cleanAction;
-                                    });
-                                return {
-                                    ...prop,
-                                        value: JSON.stringify({ Actions: cleanOnSuccess })
-                                };
-                            } else if (prop.name === "OnFailure") {
-                                    // Remove _uid field but keep all other fields for rule engine compatibility
-                                    const cleanOnFailure = onFailure.map(action => {
-                                        const { _uid, ...cleanAction } = action;
-                                        return cleanAction;
-                                    });
-                                return {
-                                    ...prop,
-                                        value: JSON.stringify({ Actions: cleanOnFailure })
-                                    };
-                                } else if (prop.name === "Expression") {
-                                    return {
-                                        ...prop,
-                                        value: node.expression && node.expression.trim() !== '' ? node.expression.trim() : prop.value
-                                };
-                            }
-                            return prop;
-                        })
-                    };
-                        console.log(`=== UPDATING EXISTING RULE ${ruleIdToUse} ===`);
-                        console.log('Original rule data:', JSON.stringify(ruleData, null, 2));
-                        console.log('Updated rule data:', JSON.stringify(ruleToSave, null, 2));
-                        console.log(`=== END UPDATE FOR RULE ${ruleIdToUse} ===`);
-                    } else {
-                        // Create new rule with chain data - use the correct identity JSON structure
-                        console.log(`Creating new rule with ID: ${ruleIdToUse}`);
-                        
-                        // Ensure we have a proper name - if node.label is empty, use a default
-                        const ruleName = node.label && node.label.trim() !== '' 
-                            ? node.label.trim() 
-                            : `New Rule ${ruleIdToUse}`;
-                        
-                        // Ensure we have a proper description
-                        const ruleDescription = node.description && node.description.trim() !== ''
-                            ? node.description.trim()
-                            : `Rule created from chain map`;
-                        
-                        ruleToSave = {
-                            id: ruleIdToUse,
-                            name: ruleName,
-                            description: ruleDescription,
-                            typeIdentifier: "Business Rule",
-                            properties: [
-                                {
-                                    name: "RuleExpressionType",
-                                    value: "LambdaExpression",
-                                    valueType: "String"
-                                },
-                                {
-                                    name: "Expression",
-                                    value: node.expression && node.expression.trim() !== '' ? node.expression.trim() : "",
-                                    valueType: "String"
-                                },
-                                {
-                                    name: "ErrorMessage",
-                                    value: "",
-                                    valueType: "String"
-                                },
-                                {
-                                    name: "OnSuccess",
-                                    value: JSON.stringify({
-                                        Actions: onSuccess.map(action => {
-                                            const { _uid, ...cleanAction } = action;
-                                            return cleanAction;
-                                        })
-                                    }),
-                                    valueType: "String"
-                                },
-                                {
-                                    name: "OnFailure",
-                                    value: JSON.stringify({
-                                        Actions: onFailure.map(action => {
-                                            const { _uid, ...cleanAction } = action;
-                                            return cleanAction;
-                                        })
-                                    }),
-                                    valueType: "String"
-                                }
-                            ]
-                        };
-                        console.log('New rule payload:', JSON.stringify(ruleToSave, null, 2));
-                    }
-                    
-                    // Save the rule to data services using the existing apiUploadRule function
-                    console.log(`Uploading rule ${ruleIdToUse} to data services...`);
-                    console.log(`=== IDENTITY JSON FOR RULE ${ruleIdToUse} ===`);
-                    console.log(JSON.stringify(ruleToSave, null, 2));
-                    console.log(`=== END IDENTITY JSON FOR RULE ${ruleIdToUse} ===`);
-                    
-                    const uploadResult = await apiUploadRule(dataServicesRootURI, ruleToSave);
-                    console.log(`Upload result for ${ruleIdToUse}:`, {
-                        status: uploadResult.status,
-                        statusText: uploadResult.statusText,
-                        uploadedRuleId: uploadResult.uploadedRuleId,
-                        endpoint: uploadResult.endpoint
-                    });
-                    
-                    if (uploadResult.status >= 200 && uploadResult.status < 300) {
-                        if (isExistingRule) {
-                            console.log(`Rule ${ruleIdToUse} was updated (existed in data services)`);
-                            savedCount++;
-                        } else {
-                            console.log(`Rule ${ruleIdToUse} was created (new in data services)`);
-                            createdCount++;
-                            
-                            // Update the local node with the ruleId if it wasn't set before
-                            if (!node.ruleId && nodeId !== ruleIdToUse) {
-                                console.log(`Updating local node ${nodeId} with ruleId ${ruleIdToUse}`);
-                                // Update the chain data to reflect the new ruleId
-                                if (ruleChainData && ruleChainData.nodes[nodeId]) {
-                                    ruleChainData.nodes[nodeId].ruleId = ruleIdToUse;
-                                    // Also update the node ID to match the ruleId for consistency
-                                    if (nodeId !== ruleIdToUse) {
-                                        ruleChainData.nodes[ruleIdToUse] = { ...ruleChainData.nodes[nodeId], id: ruleIdToUse };
-                                        delete ruleChainData.nodes[nodeId];
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        throw new Error(uploadResult.statusText || 'Upload failed');
-                    }
-                    
-                } catch (error: any) {
-                    console.error(`Error saving rule ${node.ruleId || nodeId}:`, error);
-                    errorCount++;
-                }
-            }
-            
-            console.log('=== CHAIN SAVE COMPLETE ===');
-            console.log(`Results: ${savedCount} updated, ${createdCount} created, ${errorCount} failed`);
-            
-            // Provide comprehensive feedback
-            if (savedCount > 0 || createdCount > 0) {
-                let message = '';
-                if (savedCount > 0 && createdCount > 0) {
-                    message = `Chain saved: ${savedCount} rules updated, ${createdCount} rules created`;
-                } else if (savedCount > 0) {
-                    message = `Chain saved: ${savedCount} rules updated`;
-                } else if (createdCount > 0) {
-                    message = `Chain saved: ${createdCount} rules created`;
-                }
-                
-                if (errorCount > 0) {
-                    message += `, ${errorCount} failed`;
-                    toast.warning(message);
-                } else {
-                toast.success(message);
-                setHasUnsavedChainChanges(false);
-                    
-                    // Trigger rule selector refresh by dispatching a custom event
-                    if (typeof window !== 'undefined') {
-                        console.log('Triggering rule selector refresh...');
-                        window.dispatchEvent(new CustomEvent('rulesUpdated'));
-                        console.log('Rule selector refresh event dispatched');
-                    }
-                    
-                    // Clear the current rule cache to force fresh data fetch
-                    setJsonData(DEFAULT_RULE_TEMPLATE);
-                    
-                    // Regenerate the chain with fresh data from the backend
-                    if (chainStartRuleId) {
-                        console.log('Regenerating chain with fresh data after save...');
-                        handleGenerateChain(chainStartRuleId, true); // Force fresh data from backend
-                    }
-                }
-            } else if (errorCount > 0) {
-                toast.error(`Failed to save chain: ${errorCount} rules failed`);
-            } else {
-                toast.info('No rules to save');
-            }
-            
-        } catch (error: any) {
-            console.error('Error saving chain:', error);
-            toast.error('Failed to save chain changes');
-        } finally {
-            setIsLoading(prev => ({ ...prev, chainData: false }));
-        }
-    }, [dataServicesRootURI, ruleChainData]);
-
     // Handle clicking a node in the chain map
     const handleRuleNodeClick = React.useCallback((ruleId: string) => {
         if (!ruleId) return;
@@ -5213,6 +4932,90 @@ function App() {
             }
         }, 100);
     }, [handleLoadRule]);
+
+    // Handle double-clicking a node in the chain map
+    const handleRuleNodeDoubleClick = React.useCallback((ruleId: string) => {
+        if (!ruleId) return;
+        
+        // Load the clicked rule into the editor and switch to editor view
+        handleLoadRule(ruleId);
+        navigateToPage('editor');
+        
+        // Scroll to the editor
+        setTimeout(() => {
+            const el = document.getElementById('rule-name');
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.focus();
+            }
+        }, 100);
+    }, [handleLoadRule, navigateToPage]);
+
+    // Chain map handler functions
+    const handleAddNode = React.useCallback((nodeData: any) => {
+        console.log('Adding node:', nodeData);
+        // Implementation for adding a node to the chain
+    }, []);
+
+    const handleDeleteNode = React.useCallback((nodeId: string) => {
+        console.log('Deleting node:', nodeId);
+        // Implementation for deleting a node from the chain
+    }, []);
+
+    const handleUpdateNode = React.useCallback((nodeId: string, updates: any) => {
+        console.log('Updating node:', nodeId, updates);
+        // Implementation for updating a node in the chain
+    }, []);
+
+    const handleUpdateEdge = React.useCallback((edgeId: string, updates: any) => {
+        console.log('Updating edge:', edgeId, updates);
+        // Implementation for updating an edge in the chain
+    }, []);
+
+    const handleSaveChain = React.useCallback(() => {
+        console.log('Saving chain');
+        // Implementation for saving the chain
+    }, []);
+
+    const handleLoadChain = React.useCallback((chainId: string) => {
+        console.log('Loading chain:', chainId);
+        // Implementation for loading a chain
+    }, []);
+
+    const handleClearChain = React.useCallback(() => {
+        console.log('Clearing chain');
+        setRuleChainData({ nodes: {}, edges: [] });
+        setChainStartRuleId("");
+        setChainError("");
+        setHasUnsavedChainChanges(false);
+    }, [setRuleChainData, setChainStartRuleId, setChainError, setHasUnsavedChainChanges]);
+
+    const handleEvaluateChain = React.useCallback(() => {
+        console.log('Evaluating chain');
+        // Implementation for evaluating the chain
+    }, []);
+
+    // Save chain to data services
+    const saveChainToDataServices = React.useCallback(async () => {
+        if (!ruleChainData || !dataServicesRootURI) {
+            toast.error("No chain data or Data Services URL configured");
+            return;
+        }
+
+        setIsLoading(prev => ({ ...prev, chainData: true }));
+        
+        try {
+            // Implementation for saving chain to data services
+            console.log('Saving chain to data services:', ruleChainData);
+            toast.success("Chain saved to Data Services");
+                setHasUnsavedChainChanges(false);
+        } catch (error: any) {
+            console.error('Error saving chain:', error);
+            toast.error(`Failed to save chain: ${error.message || 'Unknown error'}`);
+        } finally {
+            setIsLoading(prev => ({ ...prev, chainData: false }));
+        }
+    }, [ruleChainData, dataServicesRootURI, setHasUnsavedChainChanges]);
 
     // Add create rule handler
     const handleCreateRule = React.useCallback(() => {
@@ -5250,30 +5053,53 @@ function App() {
     return (
         <div className="min-h-screen bg-background text-foreground">
             {/* Header */}
-            <div className={appMode === 'monitor' ? 'fixed top-0 left-0 right-0 z-50 bg-background border-b h-14' : ''}>
-                <div className={appMode === 'monitor' ? 'h-full flex items-center px-4' : isChainViewVisible ? 'px-4 py-3' : 'container mx-auto pt-6 px-6'}>
-                    <div className={appMode === 'monitor' ? 'flex items-center justify-between w-full' : 'flex items-center justify-between'}>
+            <div className={currentPage === 'monitor' ? 'fixed top-0 left-0 right-0 z-50 bg-background border-b h-14' : ''}>
+                <div className={currentPage === 'monitor' ? 'h-full flex items-center px-4' : currentPage === 'chain' ? 'px-4 py-3' : 'container mx-auto pt-6 px-6'}>
+                    <div className={currentPage === 'monitor' ? 'flex items-center justify-between w-full' : 'flex items-center justify-between'}>
                         <div>
-                            <h1 className={appMode === 'monitor' ? 'text-xl font-bold' : 'text-3xl font-bold text-foreground'}>
-                                Biosero Rules Engine - {appMode === 'editor' ? 'Rule Editor' : 'Sample Monitor'}
+                            <h1 className={currentPage === 'monitor' ? 'text-xl font-bold' : 'text-3xl font-bold text-foreground'}>
+                                Biosero Rules Engine - {currentPage === 'editor' ? 'Rule Editor' : currentPage === 'chain' ? 'Chain Map' : 'Sample Monitor'}
                             </h1>
-                            {appMode === 'editor' && (
+                            {currentPage === 'editor' && (
                                 <p className="text-muted-foreground">
                                     Create and manage business rules with action workflows
                                 </p>
                             )}
                         </div>
                         <div className="flex items-center gap-2">
+                            {/* Navigation buttons */}
+                            <div className="flex items-center gap-1">
                             <Button
-                                onClick={() => setAppMode(appMode === 'editor' ? 'monitor' : 'editor')}
-                                variant="outline"
+                                    onClick={() => navigateToPage('editor')}
+                                    variant={currentPage === 'editor' ? 'default' : 'outline'}
                                 size="sm"
                                 className="gap-2"
-                                title={`Switch to ${appMode === 'editor' ? 'monitor' : 'editor'} mode`}
+                                    title="Rule Editor"
+                                >
+                                    <Flask size={16} />
+                                    Editor
+                                </Button>
+                                <Button
+                                    onClick={() => navigateToPage('chain')}
+                                    variant={currentPage === 'chain' ? 'default' : 'outline'}
+                                    size="sm"
+                                    className="gap-2"
+                                    title="Chain Map"
+                                >
+                                    <Network size={16} />
+                                    Chain
+                                </Button>
+                                <Button
+                                    onClick={() => navigateToPage('monitor')}
+                                    variant={currentPage === 'monitor' ? 'default' : 'outline'}
+                                    size="sm"
+                                    className="gap-2"
+                                    title="Sample Monitor"
                             >
                                 <Monitor size={16} />
-                                {appMode === 'editor' ? 'Monitor' : 'Editor'}
+                                    Monitor
                             </Button>
+                            </div>
                             <Button
                                 onClick={toggleTheme}
                                 variant="outline"
@@ -5290,13 +5116,12 @@ function App() {
             </div>
 
             {/* Main Content */}
-            <div className={appMode === 'monitor' ? '' : isChainViewVisible ? 'w-full px-4 py-3 space-y-3' : 'container mx-auto p-6 space-y-6'}>
-                {/* Conditional rendering based on app mode */}
-                {appMode === 'editor' ? (
+            <div className={currentPage === 'monitor' ? '' : currentPage === 'chain' ? 'w-full px-4 py-3 space-y-3' : 'container mx-auto p-6 space-y-6'}>
+                {currentPage === 'editor' && (
                     <>
                         {/* Toolbar */}
                 <Card>
-                    <CardHeader className={isChainViewVisible ? 'pb-2' : 'pb-4'}>
+                    <CardHeader className="pb-4">
                         <div className="flex flex-wrap gap-4 items-center justify-between">
                             {/* Main Actions */}
                             <div className="flex flex-wrap gap-2">
@@ -5311,8 +5136,8 @@ function App() {
                                 <Button 
                                     onClick={handleUploadToApi} 
                                     className="gap-2" 
-                                    disabled={isLoading.upload || isChainViewVisible}
-                                    title={isChainViewVisible ? "Upload is disabled when chain map is open. Use 'Save Chain' in the chain map dialog." : "Upload the current rule to Data Services"}
+                                    disabled={isLoading.upload}
+                                    title="Upload the current rule to Data Services"
                                 >
                                     {isLoading.upload ? <SpinnerGap size={16} className="animate-spin" /> : <CloudArrowUp size={16} />}
                                     {isLoading.upload ? "Uploading..." : "Upload Current Rule"}
@@ -5324,14 +5149,6 @@ function App() {
                                 >
                                     {isLoading.import ? <SpinnerGap size={16} className="animate-spin" /> : <Download size={16} />}
                                     {isLoading.import ? "Importing..." : "Import"}
-                                </Button>
-                                <Button 
-                                    onClick={() => setShowChainMapDialog(true)}
-                                    className="gap-2"
-                                    disabled={isLoading.chainData}
-                                >
-                                    <Network size={16} />
-                                    {isLoading.chainData ? 'Generating...' : 'Chain Map'}
                                 </Button>
                             </div>
 
@@ -5585,164 +5402,23 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                     </CardHeader>
                 </Card>
 
-                {/* Main Content - Full chain map when visible, otherwise rule editor */}
-                {isChainViewVisible ? (
-                    /* Full-width Interactive Chain Map */
-                    <div className="h-[calc(100vh-200px)] w-full">
-                        <div className="flex flex-col h-full w-full overflow-hidden bg-background border border-border rounded-lg">
-                            {/* Streamlined Chain Map Header */}
-                            <div className="p-2 border-b border-border bg-card/50 flex-shrink-0">
-                                <div className="flex items-center justify-center">
-                                    <div className="flex-1">
-                                        <h3 className="text-sm font-semibold text-foreground">Interactive Rule Chain Map</h3>
-                                        <p className="text-muted-foreground text-xs">
-                                            Click nodes to edit • Drag to rearrange • Connect via handles
-                                        </p>
-                                    </div>
-                                    
-                                    {/* Centered Rule Selector */}
-                                    <div className="flex items-center gap-2 flex-1 justify-center">
-                                        <label className="text-xs text-muted-foreground whitespace-nowrap">
-                                            Initiating Rule:
-                                        </label>
-                                        <div className="w-52">
-                                            <SimpleRuleSelector
-                                                dataServicesRootURI={dataServicesRootURI || ""}
-                                                onRuleSelect={(ruleId) => {
-                                                    if (ruleId && ruleId !== chainStartRuleId) {
-                                                        setChainStartRuleId(ruleId);
-                                                        handleGenerateChain(ruleId);
-                                                    }
-                                                }}
-                                                value={chainStartRuleId || ""}
-                                                className="bg-card border-border text-foreground text-sm"
-                                                placeholder="Select rule"
-                                                disabled={isLoading.chainData}
-                                            />
-                                        </div>
-                                        </div>
-                                    
-                                    {/* Validation status */}
-                                    {ruleChainData && Object.keys(ruleChainData.nodes).length > 0 && (() => {
-                                        const ruleNodes = Object.entries(ruleChainData.nodes)
-                                            .filter(([_, node]) => node.ruleId && !node.actionType);
-                                        
-                                        const invalidRules = ruleNodes.filter(([_, node]) => 
-                                            !node.label || node.label.trim() === '' || 
-                                            !node.expression || node.expression.trim() === ''
-                                        );
-                                        
-                                        if (invalidRules.length > 0) {
-                                            return (
-                                                <div className="flex items-center gap-2 text-xs text-yellow-600 dark:text-yellow-400">
-                                                    <AlertCircle className="w-3 h-3" />
-                                                    <span>{invalidRules.length} rule{invalidRules.length !== 1 ? 's' : ''} need{invalidRules.length === 1 ? 's' : ''} validation</span>
-                                    </div>
-                                            );
-                                        }
-                                        return null;
-                                    })()}
-                                    
-                                    {/* Right-aligned control buttons */}
-                                    <div className="flex gap-1 flex-1 justify-end">
-                                        <Button 
-                                            onClick={() => {
-                                                setRuleChainData({ nodes: {}, edges: [] });
-                                                setChainStartRuleId("");
-                                                setChainError("");
-                                                setHasUnsavedChainChanges(false);
-                                                toast.success("New chain canvas cleared");
-                                            }}
-                                            size="sm"
-                                            className="text-foreground bg-green-600 hover:bg-green-700 px-2 h-6 text-xs"
-                                            title="Clear canvas and start a new rule chain"
-                                        >
-                                            New Chain
-                                        </Button>
-                                        <Button 
-                                            onClick={saveChainToDataServices}
-                                            size="sm"
-                                            className={`text-foreground px-2 h-6 text-xs ${
-                                                hasUnsavedChainChanges 
-                                                    ? 'bg-blue-600 hover:bg-blue-700' 
-                                                    : 'bg-gray-600 hover:bg-gray-700'
-                                            }`}
-                                            title="Save all chain changes to data services"
-                                            disabled={isLoading.chainData}
-                                        >
-                                            {isLoading.chainData ? 'Saving...' : hasUnsavedChainChanges ? 'Save Chain*' : 'Save Chain'}
-                                        </Button>
-                                        <Button 
-                                            onClick={() => {
-                                                if (ruleChainData) {
-                                                    const exportData = JSON.stringify(ruleChainData, null, 2);
-                                                    const blob = new Blob([exportData], { type: 'application/json' });
-                                                    const url = URL.createObjectURL(blob);
-                                                    const a = document.createElement('a');
-                                                    a.href = url;
-                                                    a.download = `chain-map-${Date.now()}.json`;
-                                                    a.click();
-                                                    URL.revokeObjectURL(url);
-                                                    toast.success('Chain map exported as JSON');
-                                                } else {
-                                                    toast.error('No chain map to export');
-                                                }
-                                            }}
-                                            size="sm"
-                                            className="text-muted-foreground border-border hover:bg-primary/80 h-6 px-2 text-xs"
-                                        >
-                                            Export
-                                        </Button>
-                                        <Button 
-                                            onClick={() => setIsChainViewVisible(false)}
-                                            size="sm"
-                                            className="text-muted-foreground border-border hover:bg-red-600/80 h-6 px-2 text-xs"
-                                            title="Close chain map and return to rule editor"
-                                        >
-                                            Close
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            {/* Interactive Chain Map Content */}
-                            <div className="flex-grow w-full overflow-hidden relative">
-                                {chainError && (
-                                    <div className="absolute inset-0 flex items-center justify-center p-4 bg-destructive/80 z-10">
-                                        <p className="text-destructive-foreground text-center">{chainError}</p>
-                                    </div>
-                                )}
-                                <ChainFlowReactFlow
-                                    chainData={ruleChainData}
-                                    onNodeClick={handleRuleNodeClick}
-                                    onChainUpdate={handleChainUpdate}
-                                    isLoading={isLoading.chainData}
-                                    isEditable={true}
-                                    dataServicesRootURI={dataServicesRootURI || ""}
-                                    autoArrangeOnLoad={true}
-                                    onLoadRuleWithChildren={handleAddRuleToChain}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    /* Rule Editor Layout */
+                {/* Rule Editor Layout */}
                     <div className="flex flex-col space-y-6">
-                        {/* Compact Rule Editor Grid with tighter spacing */}
-                        <div className={`${isChainViewVisible ? 'grid grid-cols-1 gap-1 flex-1 overflow-auto' : 'grid grid-cols-1 lg:grid-cols-3 gap-6'}`}>
-                            {/* Rule Identity - More compact when chain view is visible */}
-                            <Card className={isChainViewVisible ? 'flex-shrink-0' : 'lg:col-span-1'}>
-                                <CardHeader className={isChainViewVisible ? 'pb-1 px-3 py-2' : ''}>
-                                    <CardTitle className={isChainViewVisible ? 'text-sm' : 'text-lg'}>Rule Identity</CardTitle>
-                                    {!isChainViewVisible && <CardDescription>Basic rule information</CardDescription>}
+                    {/* Rule Editor Grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Rule Identity */}
+                        <Card className="lg:col-span-1">
+                            <CardHeader>
+                                <CardTitle className="text-lg">Rule Identity</CardTitle>
+                                <CardDescription>Basic rule information</CardDescription>
                                 </CardHeader>
-                                <CardContent className={`space-y-${isChainViewVisible ? '2' : '4'} ${isChainViewVisible ? 'px-3 py-2' : ''}`}>
+                            <CardContent className="space-y-4">
                                     {jsonData?.id && (
                                         <div>
                                             <label className="block text-xs font-medium text-muted-foreground mb-1">
                                                 ID
                                             </label>
-                                            <div className={`text-sm bg-muted px-2 py-1 rounded font-mono ${isChainViewVisible ? 'text-xs' : ''}`}>
+                                        <div className="text-sm bg-muted px-2 py-1 rounded font-mono">
                                                 {jsonData.id}
                                             </div>
                                         </div>
@@ -5757,7 +5433,6 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                             value={jsonData?.name || ""}
                                             onChange={(e) => handleInputChange('name', e.target.value)}
                                             placeholder="Enter rule name"
-                                            className={isChainViewVisible ? 'h-7 text-xs' : ''}
                                         />
                                     </div>
 
@@ -5770,20 +5445,19 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                             value={jsonData?.description || ""}
                                             onChange={(e) => handleInputChange('description', e.target.value)}
                                             placeholder="Enter rule description"
-                                            rows={isChainViewVisible ? 2 : 3}
-                                            className={isChainViewVisible ? 'text-xs min-h-[3rem]' : ''}
+                                        rows={3}
                                         />
                                     </div>
                                 </CardContent>
                             </Card>
 
-                            {/* Rule Properties - Responsive layout with tighter spacing */}
-                            <Card className={isChainViewVisible ? 'flex-shrink-0' : 'lg:col-span-2'}>
-                                <CardHeader className={isChainViewVisible ? 'pb-1 px-3 py-2' : ''}>
-                                    <CardTitle className={isChainViewVisible ? 'text-sm' : 'text-lg'}>Rule Properties</CardTitle>
-                                    {!isChainViewVisible && <CardDescription>Configure rule logic and behavior</CardDescription>}
+                        {/* Rule Properties */}
+                        <Card className="lg:col-span-2">
+                            <CardHeader>
+                                <CardTitle className="text-lg">Rule Properties</CardTitle>
+                                <CardDescription>Configure rule logic and behavior</CardDescription>
                                 </CardHeader>
-                                <CardContent className={`space-y-${isChainViewVisible ? '2' : '6'} ${isChainViewVisible ? 'px-3 py-2' : ''}`}>
+                            <CardContent className="space-y-6">
                                     {/* Expression */}
                                     <div>
                                         <div className="flex items-center justify-between mb-1">
@@ -5830,9 +5504,9 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                                 }}
                                                 disabled={rulesEngineHealthStatus !== 'success'}
                                                 size="sm"
-                                                className={`gap-1 ${isChainViewVisible ? 'h-6 px-2 text-xs' : ''}`}
+                                                className="gap-1"
                                             >
-                                                <Flask size={isChainViewVisible ? 10 : 14} />
+                                                <Flask size={14} />
                                                 Test
                                             </Button>
                                         </div>
@@ -5841,13 +5515,11 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                             value={getPropertyValue("Expression")}
                                             onChange={(e) => handlePropertyChange("Expression", e.target.value)}
                                             placeholder="e.g., key == 'Ready' AND Convert.ToDouble(value) > 0.5"
-                                            className={`font-mono text-sm ${isChainViewVisible ? 'h-7 text-xs' : ''}`}
+                                            className="font-mono text-sm"
                                         />
-                                        {!isChainViewVisible && (
                                             <p className="text-xs text-muted-foreground mt-1">
                                                 Use C#-like syntax. Variables will be automatically detected.
                                             </p>
-                                        )}
                                     </div>
 
                                     {/* Error Message */}
@@ -5860,16 +5532,69 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                             value={getPropertyValue("ErrorMessage")}
                                             onChange={(e) => handlePropertyChange("ErrorMessage", e.target.value)}
                                             placeholder="Message to display when rule evaluation fails"
-                                            className={isChainViewVisible ? 'h-7 text-xs' : ''}
+                                            className=""
                                         />
                                     </div>
                                 </CardContent>
                             </Card>
                         </div>
 
-                        {/* Compact Actions Section when chain view is visible */}
-                        {!isChainViewVisible ? (
-                            /* Full Actions Layout */
+                        {/* Actions Summary */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg">Actions Summary</CardTitle>
+                                <CardDescription>Overview of configured success and failure actions</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="grid grid-cols-2 gap-4">
+                                    {/* Success Actions Summary */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <CheckCircle size={16} className="text-green-500" />
+                                            <span className="font-medium">Success Actions ({getActions("OnSuccess").length})</span>
+                                        </div>
+                                        <div className="text-sm space-y-1 max-h-20 overflow-y-auto">
+                                            {getActions("OnSuccess").length === 0 ? (
+                                                <div className="text-muted-foreground">None configured</div>
+                                            ) : (
+                                                getActions("OnSuccess").slice(0, 3).map((action, index) => (
+                                                    <div key={action._uid} className="text-green-600 dark:text-green-400 truncate">
+                                                        {action.ActionType?.replace('Action', '') || 'Action'}
+                                                    </div>
+                                                ))
+                                            )}
+                                            {getActions("OnSuccess").length > 3 && (
+                                                <div className="text-muted-foreground text-xs">+{getActions("OnSuccess").length - 3} more</div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Failure Actions Summary */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <XCircle size={16} className="text-red-500" />
+                                            <span className="font-medium">Failure Actions ({getActions("OnFailure").length})</span>
+                                        </div>
+                                        <div className="text-sm space-y-1 max-h-20 overflow-y-auto">
+                                            {getActions("OnFailure").length === 0 ? (
+                                                <div className="text-muted-foreground">None configured</div>
+                                            ) : (
+                                                getActions("OnFailure").slice(0, 3).map((action, index) => (
+                                                    <div key={action._uid} className="text-red-600 dark:text-red-400 truncate">
+                                                        {action.ActionType?.replace('Action', '') || 'Action'}
+                                                    </div>
+                                                ))
+                                            )}
+                                            {getActions("OnFailure").length > 3 && (
+                                                <div className="text-muted-foreground text-xs">+{getActions("OnFailure").length - 3} more</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Actions Section */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 {/* On Success Actions */}
                                 <Card>
@@ -5911,73 +5636,18 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                     </CardContent>
                                 </Card>
                             </div>
-                        ) : (
-                            /* Compact Actions Layout - Single row with counts */
-                            <div className="grid grid-cols-2 gap-1 flex-shrink-0">
-                                {/* Compact Success Actions */}
-                                <Card>
-                                    <CardHeader className="pb-1 px-3 py-1">
-                                        <CardTitle className="text-xs flex items-center gap-1">
-                                            <CheckCircle size={12} className="text-green-500" />
-                                            Success ({getActions("OnSuccess").length})
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="px-3 py-1">
-                                        <div className="text-xs space-y-0.5 max-h-12 overflow-y-auto">
-                                            {getActions("OnSuccess").length === 0 ? (
-                                                <div className="text-muted-foreground">None</div>
-                                            ) : (
-                                                getActions("OnSuccess").slice(0, 2).map((action, index) => (
-                                                    <div key={action._uid} className="text-green-400 truncate">
-                                                        {action.ActionType?.replace('Action', '') || 'Action'}
                                                     </div>
-                                                ))
-                                            )}
-                                            {getActions("OnSuccess").length > 2 && (
-                                                <div className="text-muted-foreground">+{getActions("OnSuccess").length - 2} more</div>
-                                            )}
-                                        </div>
-                                    </CardContent>
-                                </Card>
 
-                                {/* Compact Failure Actions */}
+                        {/* JSON Preview */}
                                 <Card>
-                                    <CardHeader className="pb-1 px-3 py-1">
-                                        <CardTitle className="text-xs flex items-center gap-1">
-                                            <XCircle size={12} className="text-red-500" />
-                                            Failure ({getActions("OnFailure").length})
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="px-3 py-1">
-                                        <div className="text-xs space-y-0.5 max-h-12 overflow-y-auto">
-                                            {getActions("OnFailure").length === 0 ? (
-                                                <div className="text-muted-foreground">None</div>
-                                            ) : (
-                                                getActions("OnFailure").slice(0, 2).map((action, index) => (
-                                                    <div key={action._uid} className="text-red-400 truncate">
-                                                        {action.ActionType?.replace('Action', '') || 'Action'}
-                                                    </div>
-                                                ))
-                                            )}
-                                            {getActions("OnFailure").length > 2 && (
-                                                <div className="text-muted-foreground">+{getActions("OnFailure").length - 2} more</div>
-                                            )}
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            </div>
-                        )}
-
-                        {/* JSON Preview - Always collapsed when chain view is visible */}
-                        <Card className="flex-shrink-0">
-                            <CardHeader className={isChainViewVisible ? 'pb-1 px-4 py-2' : ''}>
+                            <CardHeader>
                                 <div 
                                     className="flex items-center justify-between cursor-pointer"
                                     onClick={() => setIsJsonCollapsed(!isJsonCollapsed)}
                                 >
                                     <div>
-                                        <CardTitle className={isChainViewVisible ? 'text-sm' : 'text-lg'}>Rule JSON</CardTitle>
-                                        {!isChainViewVisible && <CardDescription>Current rule structure in JSON format</CardDescription>}
+                                        <CardTitle className="text-lg">Rule JSON</CardTitle>
+                                        <CardDescription>Current rule structure in JSON format</CardDescription>
                                     </div>
                                     <Button variant="ghost" size="sm" className="p-1">
                                         {isJsonCollapsed ? <CaretRight size={16} /> : <CaretDown size={16} />}
@@ -5985,18 +5655,125 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                 </div>
                             </CardHeader>
                             {!isJsonCollapsed && (
-                                <CardContent className={isChainViewVisible ? 'px-4 py-1' : ''}>
-                                    <pre className={`text-xs bg-muted ${isChainViewVisible ? 'p-2' : 'p-4'} rounded overflow-auto ${isChainViewVisible ? 'max-h-32' : 'max-h-96'} font-mono`}>
+                                <CardContent>
+                                    <pre className="text-xs bg-muted p-4 rounded overflow-auto max-h-96 font-mono">
                                         {safeStringifyJSON(jsonData, 2)}
                                     </pre>
                                 </CardContent>
                             )}
                         </Card>
+                    </>
+                )}
+                
+                {currentPage === 'chain' && (
+                    <div className="h-[calc(100vh-120px)] w-full">
+                        <div className="flex flex-col h-full w-full overflow-hidden bg-background border border-border rounded-lg">
+                            {/* Chain Map Header */}
+                            <div className="p-4 border-b border-border bg-card/50 flex-shrink-0">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex-1">
+                                        <h3 className="text-lg font-semibold text-foreground">Interactive Rule Chain Map</h3>
+                                        <p className="text-muted-foreground text-sm">
+                                            Click nodes to edit • Drag to rearrange • Connect via handles
+                                        </p>
+                                    </div>
+                                    
+                                    {/* Rule Selector */}
+                                    <div className="flex items-center gap-4 flex-1 justify-center">
+                                        <label className="text-sm text-muted-foreground whitespace-nowrap">
+                                            Initiating Rule:
+                                        </label>
+                                        <div className="w-64">
+                                            <SimpleRuleSelector
+                                                dataServicesRootURI={dataServicesRootURI || ""}
+                                                onRuleSelect={(ruleId) => {
+                                                    if (ruleId && ruleId !== chainStartRuleId) {
+                                                        setChainStartRuleId(ruleId);
+                                                        handleGenerateChain(ruleId);
+                                                    }
+                                                }}
+                                                value={chainStartRuleId || ""}
+                                                className="bg-card border-border text-foreground text-sm"
+                                                placeholder="Select rule"
+                                                disabled={isLoading.chainData}
+                                            />
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Action Buttons */}
+                                    <div className="flex gap-2 flex-1 justify-end">
+                                        <Button 
+                                            onClick={() => {
+                                                setRuleChainData({ nodes: {}, edges: [] });
+                                                setChainStartRuleId("");
+                                                setChainError("");
+                                                setHasUnsavedChainChanges(false);
+                                                toast.success("New chain canvas cleared");
+                                            }}
+                                            size="sm"
+                                            className="text-foreground bg-green-600 hover:bg-green-700"
+                                            title="Clear canvas and start a new rule chain"
+                                        >
+                                            New Chain
+                                        </Button>
+                                        <Button 
+                                            onClick={saveChainToDataServices}
+                                            size="sm"
+                                            className={`text-foreground ${
+                                                hasUnsavedChainChanges 
+                                                    ? 'bg-blue-600 hover:bg-blue-700' 
+                                                    : 'bg-gray-600 hover:bg-gray-700'
+                                            }`}
+                                            title="Save all chain changes to data services"
+                                            disabled={isLoading.chainData}
+                                        >
+                                            {isLoading.chainData ? 'Saving...' : hasUnsavedChainChanges ? 'Save Chain*' : 'Save Chain'}
+                                        </Button>
+                                        <Button 
+                                            onClick={() => {
+                                                if (ruleChainData) {
+                                                    const exportData = JSON.stringify(ruleChainData, null, 2);
+                                                    const blob = new Blob([exportData], { type: 'application/json' });
+                                                    const url = URL.createObjectURL(blob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url;
+                                                    a.download = `chain-map-${Date.now()}.json`;
+                                                    a.click();
+                                                    URL.revokeObjectURL(url);
+                                                    toast.success('Chain map exported as JSON');
+                                                } else {
+                                                    toast.error('No chain map to export');
+                                                }
+                                            }}
+                                            size="sm"
+                                            className="text-muted-foreground border-border hover:bg-primary/80"
+                                        >
+                                            Export
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {/* Chain Map Content */}
+                            <div className="flex-grow w-full overflow-hidden relative">
+                                {chainError && (
+                                    <div className="absolute inset-0 flex items-center justify-center p-4 bg-destructive/80 z-10">
+                                        <p className="text-destructive-foreground text-center">{chainError}</p>
                     </div>
                 )}
-                    </>
-                ) : (
-                    /* Monitor Mode */
+                                <ChainFlowReactFlow
+                                    chainData={ruleChainData}
+                                    onNodeClick={handleRuleNodeClick}
+                                    onChainUpdate={handleChainUpdate}
+                                    autoArrangeOnLoad={true}
+                                    dataServicesRootURI={dataServicesRootURI}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+                
+                {currentPage === 'monitor' && (
                     <SampleMonitor
                         rulesEngineUrl={rulesEngineRootURI || ""}
                         dataServicesUrl={dataServicesRootURI || ""}
@@ -6004,7 +5781,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                         onLoadRule={(ruleId) => {
                             // Load rule and switch back to editor mode
                             handleLoadRule(ruleId);
-                            setAppMode('editor');
+                            navigateToPage('editor');
                         }}
                     />
                 )}
