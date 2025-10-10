@@ -4054,6 +4054,7 @@ function App() {
     const [chainDropdownValue, setChainDropdownValue] = React.useState(""); // Separate state for dropdown display
     const [chainError, setChainError] = React.useState('');
     const [hasUnsavedChainChanges, setHasUnsavedChainChanges] = React.useState(false);
+    const [shouldAutoArrange, setShouldAutoArrange] = React.useState(false); // Control auto-arrange
     const [isLoading, setIsLoading] = React.useState({
         chainData: false,
         rule: false,
@@ -4844,6 +4845,7 @@ function App() {
             console.log('Cleaned edges:', cleanedGraph.edges.map(edge => `${edge.from} -> ${edge.to} (${edge.type})`));
             
             setRuleChainData(cleanedGraph);
+            setShouldAutoArrange(true); // Trigger auto-arrange for new rule selection
             navigateToPage('chain');
             setHasUnsavedChainChanges(false);
             toast.success(`Recursive chain map generated: ${Object.keys(cleanedGraph.nodes).length} rules found`);
@@ -4953,8 +4955,22 @@ function App() {
             setChainStartRuleId(initiatingNode.ruleId);
         }
         
+        // Reset auto-arrange flag after chain update (manual changes shouldn't auto-arrange)
+        setShouldAutoArrange(false);
+        
         toast.info('Chain updated (unsaved)');
     }, [setChainStartRuleId]);
+
+    // Reset auto-arrange flag after it's been used
+    React.useEffect(() => {
+        if (shouldAutoArrange) {
+            // Reset the flag after a short delay to allow auto-arrange to complete
+            const timer = setTimeout(() => {
+                setShouldAutoArrange(false);
+            }, 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [shouldAutoArrange]);
     
     // Handle clicking a node in the chain map
     const handleRuleNodeClick = React.useCallback((ruleId: string) => {
@@ -5885,6 +5901,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                     onNodeClick={handleRuleNodeClick}
                                     onChainUpdate={handleChainUpdate}
                                     autoArrangeOnLoad={true}
+                                    shouldAutoArrange={shouldAutoArrange}
                                     dataServicesRootURI={dataServicesRootURI}
                                 />
                             </div>

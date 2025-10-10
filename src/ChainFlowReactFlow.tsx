@@ -108,6 +108,7 @@ interface ChainFlowProps {
     dataServicesRootURI?: string;
     autoArrangeOnLoad?: boolean;
     onLoadRuleWithChildren?: (ruleId: string) => Promise<void>;
+    shouldAutoArrange?: boolean; // New prop to control when to auto-arrange
 }
 
 // Custom Rule Node Component
@@ -542,7 +543,8 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
     isEditable = true,
     dataServicesRootURI,
     autoArrangeOnLoad = false,
-    onLoadRuleWithChildren
+    onLoadRuleWithChildren,
+    shouldAutoArrange = false
 }) => {
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -811,11 +813,19 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             return;
         }
         
-        // Check if this is a new chain (any change in chain data)
-        // Reset auto-arrange for any new chain data to ensure it always arranges
-        const isNewChain = prevChainDataRef.current !== chainData;
-        if (isNewChain && autoArrangeOnLoad) {
-            // Reset auto-arrange flag for any new chain data
+        // Check if we should auto-arrange based on the shouldAutoArrange prop
+        // This allows the parent to control when auto-arrange should happen
+        if (shouldAutoArrange && autoArrangeOnLoad) {
+            // Reset auto-arrange flag when explicitly requested
+            setHasAutoArranged(false);
+        }
+        
+        // Also check for significant chain changes (fallback)
+        const isNewChain = (prevNodeCountRef.current === 0 && currentNodeCount > 0) || 
+                          (prevNodeCountRef.current > 0 && currentNodeCount === 0) ||
+                          (Math.abs(currentNodeCount - prevNodeCountRef.current) > 5);
+        if (isNewChain && autoArrangeOnLoad && !shouldAutoArrange) {
+            // Only auto-arrange for significant changes if not explicitly controlled
             setHasAutoArranged(false);
         }
         
