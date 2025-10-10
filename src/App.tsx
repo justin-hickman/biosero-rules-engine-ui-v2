@@ -5052,6 +5052,15 @@ function App() {
             // Convert each chain node to a proper Rule format and save individually
             for (const node of nodes) {
                 try {
+                    // Skip action nodes - only save rule nodes
+                    if (node.actionType) {
+                        console.log(`Skipping action node: ${node.id}`);
+                        continue;
+                    }
+
+                    // Get the proper actions for this rule based on chain edges
+                    const { onSuccess, onFailure } = convertChainDataToRuleActions(ruleChainData, node.ruleId || node.id);
+
                     // Create a proper Rule object for each chain node
                     const rule: Rule = {
                         id: node.ruleId || node.id,
@@ -5076,12 +5085,12 @@ function App() {
                             },
                             {
                                 name: "OnSuccess",
-                                value: { Actions: [] },
+                                value: { Actions: onSuccess },
                                 valueType: "String"
                             },
                             {
                                 name: "OnFailure",
-                                value: { Actions: [] },
+                                value: { Actions: onFailure },
                                 valueType: "String"
                             }
                         ]
