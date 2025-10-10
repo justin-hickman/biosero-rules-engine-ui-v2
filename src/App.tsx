@@ -5045,76 +5045,77 @@ function App() {
         setIsLoading(prev => ({ ...prev, chainData: true }));
         
         try {
-            // Create a chain metadata rule that contains the chain structure
-            const chainId = chainStartRuleId || 'generated-chain';
-            const chainMetadataRule: Rule = {
-                id: `chain-${chainId}`,
-                name: `Chain: ${chainId}`,
-                description: `Rule chain containing ${Object.keys(ruleChainData.nodes).length} rules`,
-                typeIdentifier: "Business Rule",
-                properties: [
-                    {
-                        name: "RuleExpressionType",
-                        value: "ChainMetadata",
-                        valueType: "String"
-                    },
-                    {
-                        name: "Expression",
-                        value: JSON.stringify({
-                            chainId: chainId,
-                            nodes: Object.values(ruleChainData.nodes).map(node => ({
-                                id: node.id,
-                                ruleId: node.ruleId,
-                                label: node.label,
-                                position: node.position,
-                                isInitiating: node.isInitiating,
-                                actionType: node.actionType,
-                                expression: node.expression,
-                                description: node.description,
-                                successActions: node.successActions,
-                                failureActions: node.failureActions,
-                                isError: node.isError
-                            })),
-                            edges: ruleChainData.edges.map(edge => ({
-                                from: edge.from,
-                                to: edge.to,
-                                type: edge.type,
-                                label: edge.label
-                            }))
-                        }),
-                        valueType: "String"
-                    },
-                    {
-                        name: "ErrorMessage",
-                        value: "",
-                        valueType: "String"
-                    },
-                    {
-                        name: "OnSuccess",
-                        value: { Actions: [] },
-                        valueType: "String"
-                    },
-                    {
-                        name: "OnFailure",
-                        value: { Actions: [] },
-                        valueType: "String"
-                    }
-                ]
-            };
+            const nodes = Object.values(ruleChainData.nodes);
+            const savedRules: string[] = [];
+            const errors: string[] = [];
 
-            // Save the chain metadata rule using the existing rule upload API
-            const result = await apiUploadRule(dataServicesRootURI, chainMetadataRule);
-            
-            console.log('Chain saved successfully:', result);
-            toast.success(`Chain saved to Data Services successfully (${Object.keys(ruleChainData.nodes).length} rules)`);
-            setHasUnsavedChainChanges(false);
+            // Convert each chain node to a proper Rule format and save individually
+            for (const node of nodes) {
+                try {
+                    // Create a proper Rule object for each chain node
+                    const rule: Rule = {
+                        id: node.ruleId || node.id,
+                        name: node.label || `Rule ${node.id}`,
+                        description: node.description || `Rule from chain: ${node.label}`,
+                        typeIdentifier: "Business Rule",
+                        properties: [
+                            {
+                                name: "RuleExpressionType",
+                                value: "LambdaExpression",
+                                valueType: "String"
+                            },
+                            {
+                                name: "Expression",
+                                value: node.expression || "",
+                                valueType: "String"
+                            },
+                            {
+                                name: "ErrorMessage",
+                                value: "",
+                                valueType: "String"
+                            },
+                            {
+                                name: "OnSuccess",
+                                value: { Actions: [] },
+                                valueType: "String"
+                            },
+                            {
+                                name: "OnFailure",
+                                value: { Actions: [] },
+                                valueType: "String"
+                            }
+                        ]
+                    };
+
+                    // Save the individual rule
+                    const result = await apiUploadRule(dataServicesRootURI, rule);
+                    savedRules.push(rule.id!);
+                    console.log(`Saved rule: ${rule.id}`, result);
+                } catch (error: any) {
+                    console.error(`Failed to save rule ${node.id}:`, error);
+                    errors.push(`${node.label || node.id}: ${error.message}`);
+                }
+            }
+
+            if (savedRules.length > 0) {
+                toast.success(`Successfully saved ${savedRules.length} rules to Data Services`);
+                setHasUnsavedChainChanges(false);
+            }
+
+            if (errors.length > 0) {
+                toast.error(`Failed to save ${errors.length} rules: ${errors.join(', ')}`);
+            }
+
+            if (savedRules.length === 0 && errors.length > 0) {
+                throw new Error(`Failed to save any rules: ${errors.join(', ')}`);
+            }
         } catch (error: any) {
             console.error('Error saving chain:', error);
             toast.error(`Failed to save chain: ${error.message || 'Unknown error'}`);
         } finally {
             setIsLoading(prev => ({ ...prev, chainData: false }));
         }
-    }, [ruleChainData, dataServicesRootURI, chainStartRuleId, setHasUnsavedChainChanges]);
+    }, [ruleChainData, dataServicesRootURI, setHasUnsavedChainChanges]);
 
     // Add create rule handler
     const handleCreateRule = React.useCallback(() => {
