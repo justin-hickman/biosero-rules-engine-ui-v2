@@ -4125,6 +4125,11 @@ function App() {
             setChainError('');
             setHasUnsavedChainChanges(false);
         }
+        
+        // Clear chain start rule when navigating to chain map
+        if (page === 'chain') {
+            setChainStartRuleId("");
+        }
     };
 
     // Health check handlers
