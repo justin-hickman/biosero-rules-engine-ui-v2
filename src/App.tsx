@@ -4051,6 +4051,7 @@ function App() {
     // Chain map state - start with blank canvas
     const [ruleChainData, setRuleChainData] = React.useState<ChainData | null>({ nodes: {}, edges: [] });
     const [chainStartRuleId, setChainStartRuleId] = useLocalStorage("chain-start-rule-id", "");
+    const [chainDropdownValue, setChainDropdownValue] = React.useState(""); // Separate state for dropdown display
     const [chainError, setChainError] = React.useState('');
     const [hasUnsavedChainChanges, setHasUnsavedChainChanges] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState({
@@ -4126,9 +4127,9 @@ function App() {
             setHasUnsavedChainChanges(false);
         }
         
-        // Clear chain start rule when navigating to chain map
+        // Clear dropdown display when navigating to chain map, but keep chainStartRuleId for functionality
         if (page === 'chain') {
-            setChainStartRuleId("");
+            setChainDropdownValue("");
         }
     };
 
@@ -5044,17 +5045,54 @@ function App() {
         setIsLoading(prev => ({ ...prev, chainData: true }));
         
         try {
-            // Implementation for saving chain to data services
-            console.log('Saving chain to data services:', ruleChainData);
-            toast.success("Chain saved to Data Services");
-                setHasUnsavedChainChanges(false);
+            // Convert chain data to the format expected by the API
+            const chainPayload = {
+                chainId: chainStartRuleId || 'generated-chain',
+                nodes: Object.values(ruleChainData.nodes).map(node => ({
+                    id: node.id,
+                    ruleId: node.ruleId,
+                    label: node.label,
+                    position: node.position,
+                    isInitiating: node.isInitiating,
+                    actionType: node.actionType,
+                    expression: node.expression,
+                    description: node.description,
+                    successActions: node.successActions,
+                    failureActions: node.failureActions,
+                    isError: node.isError
+                })),
+                edges: ruleChainData.edges.map(edge => ({
+                    from: edge.from,
+                    to: edge.to,
+                    type: edge.type,
+                    label: edge.label
+                }))
+            };
+
+            const response = await fetch(`${dataServicesRootURI}/api/chains`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(chainPayload)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to save chain: ${response.status} ${errorText}`);
+            }
+
+            const result = await response.json();
+            console.log('Chain saved successfully:', result);
+            toast.success("Chain saved to Data Services successfully");
+            setHasUnsavedChainChanges(false);
         } catch (error: any) {
             console.error('Error saving chain:', error);
             toast.error(`Failed to save chain: ${error.message || 'Unknown error'}`);
         } finally {
             setIsLoading(prev => ({ ...prev, chainData: false }));
         }
-    }, [ruleChainData, dataServicesRootURI, setHasUnsavedChainChanges]);
+    }, [ruleChainData, dataServicesRootURI, chainStartRuleId, setHasUnsavedChainChanges]);
 
     // Add create rule handler
     const handleCreateRule = React.useCallback(() => {
@@ -5726,12 +5764,13 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                             <SimpleRuleSelector
                                                 dataServicesRootURI={dataServicesRootURI || ""}
                                                 onRuleSelect={(ruleId) => {
-                                                    if (ruleId && ruleId !== chainStartRuleId) {
+                                                    if (ruleId && ruleId !== chainDropdownValue) {
+                                                        setChainDropdownValue(ruleId);
                                                         setChainStartRuleId(ruleId);
                                                         handleGenerateChain(ruleId);
                                                     }
                                                 }}
-                                                value={chainStartRuleId || ""}
+                                                value={chainDropdownValue || ""}
                                                 className="bg-card border-border text-foreground text-sm"
                                                 placeholder="Select rule"
                                                 disabled={isLoading.chainData}
