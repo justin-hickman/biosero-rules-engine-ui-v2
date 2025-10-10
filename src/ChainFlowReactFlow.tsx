@@ -859,6 +859,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                     ruleId: node.ruleId || (!isAction ? node.id : undefined), // Ensure ruleId is set for rule nodes
                     actionType: node.actionType,
                     expression: node.expression,
+                    description: node.description,
                     isInitiating: node.isInitiating,
                     readonly: !isEditable,
                     onClick: isEditable && onNodeClick ? onNodeClick : undefined,
@@ -1891,6 +1892,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                                     label: editingNode.label,
                                                     ruleId: editingNode.ruleId || nodeKey,
                                                     expression: editingNode.expression,
+                                                    description: editingNode.description,
                                                     isInitiating: editingNode.isInitiating
                                                 } 
                                             };
