@@ -1015,6 +1015,14 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                 <CardContent className="space-y-3">
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
+                                            <label className="text-sm font-medium text-muted-foreground">Rule Identifier</label>
+                                            <div className="mt-1">
+                                                <code className="text-sm font-mono bg-muted/50 px-2 py-1 rounded">
+                                                    {selectedNodeDetails.nodeId}
+                                                </code>
+                                            </div>
+                                        </div>
+                                        <div>
                                             <label className="text-sm font-medium text-muted-foreground">Status</label>
                                             <div className="mt-1">
                                                 {selectedNodeDetails.executionResult ? (
@@ -1030,6 +1038,9 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                                 )}
                                             </div>
                                         </div>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-1 gap-4">
                                         <div>
                                             <label className="text-sm font-medium text-muted-foreground">Evaluated At</label>
                                             <div className="mt-1 text-sm">
