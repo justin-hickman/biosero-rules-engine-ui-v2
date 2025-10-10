@@ -811,13 +811,11 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
             return;
         }
         
-        // Check if this is a completely new chain (significant change in node count)
-        // Only reset auto-arrange if going from 0 nodes to many, or many to 0
-        const isNewChain = (prevNodeCountRef.current === 0 && currentNodeCount > 0) || 
-                          (prevNodeCountRef.current > 0 && currentNodeCount === 0) ||
-                          (Math.abs(currentNodeCount - prevNodeCountRef.current) > 5); // Increased threshold
+        // Check if this is a new chain (any change in chain data)
+        // Reset auto-arrange for any new chain data to ensure it always arranges
+        const isNewChain = prevChainDataRef.current !== chainData;
         if (isNewChain && autoArrangeOnLoad) {
-            // Only reset auto-arrange flag if autoArrangeOnLoad is enabled
+            // Reset auto-arrange flag for any new chain data
             setHasAutoArranged(false);
         }
         
