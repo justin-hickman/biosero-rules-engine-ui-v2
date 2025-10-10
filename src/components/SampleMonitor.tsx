@@ -943,10 +943,6 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                         : "No rule chain execution data is available for this sample."}
                                 </p>
                             </div>
-                            <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-lg">
-                                <p className="font-medium mb-1">💡 Tip:</p>
-                                <p>For better performance, consider asking your admin to add a context-to-chain lookup endpoint.</p>
-                            </div>
                         </div>
                     </div>
                 ) : stableChainData ? (
