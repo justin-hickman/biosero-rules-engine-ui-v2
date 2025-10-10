@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Lightning, CheckCircle, XCircle, Clock, Code, Database } from '@phosphor-icons/react';
+import { Lightning, CheckCircle, XCircle, Clock, Code } from '@phosphor-icons/react';
 import { Loader2 } from 'lucide-react';
-import { ChevronDown } from 'lucide-react';
 import { SampleList } from './SampleList';
 import { MonitorChainFlowWrapper } from './MonitorChainFlow';
 import { ContextViewer } from './ContextViewer';
@@ -34,7 +33,7 @@ export function SampleMonitor({
     dataServicesUrl,
     chainData,
     onLoadRule,
-    isAutoRefresh = true
+    isAutoRefresh = false
 }: SampleMonitorProps) {
     const [selectedContext, setSelectedContext] = useState<WorkflowContext | null>(null);
     const [chainExecution, setChainExecution] = useState<ChainContext | null>(null);
@@ -53,16 +52,20 @@ export function SampleMonitor({
         ruleStatusMap?: Record<string, string>;
         chainStructure?: any;
     } | null>(null);
-    const [showVariables, setShowVariables] = useState(false);
     const [fullChainData, setFullChainData] = useState<ChainData | null>(null);
     const [ruleExpressions, setRuleExpressions] = useState<Record<string, string>>({});
-    const [currentAutoRefresh, setCurrentAutoRefresh] = useState(true);
+    const [currentAutoRefresh, setCurrentAutoRefresh] = useState(isAutoRefresh);
     const lastStableDataRef = React.useRef<string | null>(null);
     
     // Handle auto-refresh state changes from SampleList
     const handleAutoRefreshChange = useCallback((isAutoRefresh: boolean) => {
         setCurrentAutoRefresh(isAutoRefresh);
     }, []);
+    
+    // Sync currentAutoRefresh with the prop
+    useEffect(() => {
+        setCurrentAutoRefresh(isAutoRefresh);
+    }, [isAutoRefresh]);
     
     // Memoize chain data to prevent unnecessary re-renders with deep comparison
     const stableChainData = React.useMemo(() => {
@@ -782,6 +785,33 @@ export function SampleMonitor({
             executionResult = (chainExecution as any).history.find((r: any) => r.ruleName === nodeId);
         }
         
+        // If no execution result found, create a basic one with available status information
+        if (!executionResult) {
+            const isSuccess = ruleStatus === 'Success';
+            const isFailed = ruleStatus === 'Failed';
+            const isPending = !ruleStatus || ruleStatus === 'Pending' || ruleStatus === 'NotRun';
+            
+            executionResult = {
+                ruleName: nodeId,
+                isSuccess: isSuccess,
+                isFailed: isFailed,
+                isPending: isPending,
+                evaluatedAt: isSuccess || isFailed ? new Date().toISOString() : null,
+                errorMessage: isFailed ? 'Rule evaluation failed' : null,
+                // Add rule expression if available
+                expression: ruleExpressions[nodeId] || 'Expression not available'
+            };
+            
+            console.log('📊 Monitor: Created fallback execution result:', {
+                ruleName: nodeId,
+                ruleStatus,
+                isSuccess,
+                isFailed,
+                isPending,
+                hasExpression: !!ruleExpressions[nodeId]
+            });
+        }
+        
         setSelectedNodeDetails({
             nodeId,
             executionResult,
@@ -856,6 +886,7 @@ export function SampleMonitor({
                         selectedSampleId={selectedContext?.sampleId}
                         onSampleSelect={handleSampleSelect}
                         onAutoRefreshChange={handleAutoRefreshChange}
+                        isAutoRefresh={currentAutoRefresh}
                     />
                 </div>
 
@@ -976,215 +1007,101 @@ export function SampleMonitor({
                     {selectedNodeDetails && (
                         <div className="space-y-4">
                             {/* Enhanced Execution Result with Rich Data */}
-                            {selectedNodeDetails.executionResult && (
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="flex items-center gap-2 text-lg">
-                                            {selectedNodeDetails.executionResult.isSuccess ? (
-                                                <CheckCircle className="w-5 h-5 text-green-500" />
-                                            ) : (
-                                                <XCircle className="w-5 h-5 text-red-500" />
-                                            )}
-                                            Rule Execution Result
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="space-y-3">
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Status</label>
-                                                <div className="mt-1">
-                                                    <Badge variant={selectedNodeDetails.executionResult.isSuccess ? "default" : "destructive"}>
-                                                        {selectedNodeDetails.executionResult.isSuccess ? "Success" : "Failed"}
-                                                    </Badge>
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Evaluated At</label>
-                                                <div className="mt-1 text-sm">
-                                                    {new Date(selectedNodeDetails.executionResult.evaluatedAt).toLocaleString()}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        
-                                        {selectedNodeDetails.executionResult.errorMessage && (
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Error Message</label>
-                                                <div className="mt-1 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-                                                    <code className="text-sm text-red-800 dark:text-red-200">
-                                                        {selectedNodeDetails.executionResult.errorMessage}
-                                                    </code>
-                                                </div>
-                                            </div>
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2 text-lg">
+                                        {selectedNodeDetails.executionResult?.isSuccess ? (
+                                            <CheckCircle className="w-5 h-5 text-green-500" />
+                                        ) : selectedNodeDetails.executionResult?.isFailed ? (
+                                            <XCircle className="w-5 h-5 text-red-500" />
+                                        ) : (
+                                            <Clock className="w-5 h-5 text-yellow-500" />
                                         )}
-                                        
-                                        {/* Rule Expression and Variables Used */}
-                                        <div className="space-y-4">
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Rule Expression</label>
-                                                <div className="mt-1 p-3 bg-muted/50 rounded-md">
-                                                    <code className="text-sm font-mono">
-                                                        {ruleExpressions[selectedNodeDetails.nodeId] || 'Expression not available'}
-                                                    </code>
-                                                </div>
-                                            </div>
-                                            
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Variables Used in Evaluation</label>
-                                                {selectedNodeDetails.status === 'pending' ? (
-                                                    <div className="mt-1 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
-                                                        <div className="text-sm text-yellow-800 dark:text-yellow-200 italic">
-                                                            Rule is pending evaluation - no variables have been used yet
-                                                        </div>
-                                                    </div>
-                                                ) : selectedNodeDetails.usedVariables && Object.keys(selectedNodeDetails.usedVariables).length > 0 ? (
-                                                    <div className="mt-1 space-y-1">
-                                                        {Object.entries(selectedNodeDetails.usedVariables).map(([varName, varValue]) => (
-                                                            <div key={varName} className="flex justify-between items-center p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-                                                                <span className="font-medium text-green-800 dark:text-green-200">{varName}</span>
-                                                                <span className="text-green-600 dark:text-green-400">{String(varValue)}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
+                                        Rule Execution Result
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-3">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-sm font-medium text-muted-foreground">Status</label>
+                                            <div className="mt-1">
+                                                {selectedNodeDetails.executionResult ? (
+                                                    selectedNodeDetails.executionResult.isSuccess ? (
+                                                        <Badge variant="default" className="bg-green-100 text-green-800 border-green-200">Success</Badge>
+                                                    ) : selectedNodeDetails.executionResult.isFailed ? (
+                                                        <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-200">Failed</Badge>
+                                                    ) : (
+                                                        <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 border-yellow-200">Not Evaluated</Badge>
+                                                    )
                                                 ) : (
-                                                    <div className="mt-1 p-3 bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-800 rounded-md">
-                                                        <div className="text-sm text-gray-600 dark:text-gray-400 italic">
-                                                            No variables were used in this rule evaluation
-                                                        </div>
-                                                    </div>
+                                                    <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 border-yellow-200">Not Evaluated</Badge>
                                                 )}
                                             </div>
                                         </div>
-                                    </CardContent>
-                                </Card>
-                            )}
-
-                            {/* Performance Metrics */}
-                            {chainExecution?.performanceMetrics && (
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="flex items-center gap-2 text-lg">
-                                            <Clock className="w-5 h-5" />
-                                            Performance Metrics
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Total Execution Time</label>
-                                                <div className="mt-1 text-sm font-mono">
-                                                    {chainExecution.performanceMetrics.totalExecutionTime}
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Average Rule Time</label>
-                                                <div className="mt-1 text-sm font-mono">
-                                                    {chainExecution.performanceMetrics.averageRuleTime}
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Slowest Rule</label>
-                                                <div className="mt-1 text-sm">
-                                                    {chainExecution.performanceMetrics.slowestRule}
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Retry Count</label>
-                                                <div className="mt-1 text-sm">
-                                                    {chainExecution.performanceMetrics.retryCount}
-                                                </div>
+                                        <div>
+                                            <label className="text-sm font-medium text-muted-foreground">Evaluated At</label>
+                                            <div className="mt-1 text-sm">
+                                                {selectedNodeDetails.executionResult?.evaluatedAt ? 
+                                                    new Date(selectedNodeDetails.executionResult.evaluatedAt).toLocaleString() :
+                                                    'Not yet evaluated'
+                                                }
                                             </div>
                                         </div>
-                                    </CardContent>
-                                </Card>
-                            )}
-
-                            {/* Progress Information */}
-                            {chainExecution?.progress && (
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="flex items-center gap-2 text-lg">
-                                            <Database className="w-5 h-5" />
-                                            Chain Progress
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="space-y-3">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-sm font-medium">Progress</span>
-                                                <span className="text-sm text-muted-foreground">
-                                                    {chainExecution.progress.completedRules} / {chainExecution.progress.totalRules} rules
-                                                </span>
+                                    </div>
+                                    
+                                    {selectedNodeDetails.executionResult?.errorMessage && (
+                                        <div>
+                                            <label className="text-sm font-medium text-muted-foreground">Error Message</label>
+                                            <div className="mt-1 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                                                <code className="text-sm text-red-800 dark:text-red-200">
+                                                    {selectedNodeDetails.executionResult.errorMessage}
+                                                </code>
                                             </div>
-                                            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                                <div 
-                                                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                                                    style={{ width: `${chainExecution.progress.percentage}%` }}
-                                                ></div>
-                                            </div>
-                                            <div className="text-sm text-muted-foreground">
-                                                {chainExecution.progress.percentage.toFixed(1)}% complete
-                                            </div>
-                                            {chainExecution.progress.estimatedCompletion && (
-                                                <div className="text-sm text-muted-foreground">
-                                                    Estimated completion: {new Date(chainExecution.progress.estimatedCompletion).toLocaleString()}
-                                                </div>
-                                            )}
                                         </div>
-                                    </CardContent>
-                                </Card>
-                            )}
-
-                            {/* Variables Used in Evaluation - Collapsible */}
-                            <Card>
-                                <CardHeader 
-                                    className="cursor-pointer hover:bg-muted/50 transition-colors"
-                                    onClick={() => setShowVariables(!showVariables)}
-                                >
-                                    <CardTitle className="flex items-center justify-between text-lg">
-                                        <div className="flex items-center gap-2">
-                                            <Database className="w-5 h-5" />
-                                            Variables Used in Evaluation
+                                    )}
+                                    
+                                    {/* Rule Expression and Variables Used */}
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="text-sm font-medium text-muted-foreground">Rule Expression</label>
+                                            <div className="mt-1 p-3 bg-muted/50 rounded-md">
+                                                <code className="text-sm font-mono">
+                                                    {ruleExpressions[selectedNodeDetails.nodeId] || 'Expression not available'}
+                                                </code>
+                                            </div>
                                         </div>
-                                        <ChevronDown className={`w-4 h-4 transition-transform ${showVariables ? 'rotate-180' : ''}`} />
-                                    </CardTitle>
-                                </CardHeader>
-                                {showVariables && (
-                                    <CardContent>
-                                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                                            {/* Show usedVariables if available (from ruleStatusHistory) */}
-                                            {selectedNodeDetails.usedVariables && Object.keys(selectedNodeDetails.usedVariables).length > 0 ? (
-                                                Object.entries(selectedNodeDetails.usedVariables).map(([key, value]) => (
-                                                    <div key={key} className="flex justify-between items-center p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-                                                        <span className="font-mono text-sm font-medium text-green-800 dark:text-green-200">{key}</span>
-                                                        <span className="text-sm text-green-700 dark:text-green-300">
-                                                            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                                                        </span>
+                                        
+                                        <div>
+                                            <label className="text-sm font-medium text-muted-foreground">Variables Used in Evaluation</label>
+                                            {selectedNodeDetails.executionResult?.isPending || !selectedNodeDetails.executionResult ? (
+                                                <div className="mt-1 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
+                                                    <div className="text-sm text-yellow-800 dark:text-yellow-200 italic">
+                                                        Rule is pending evaluation - no variables have been used yet
                                                     </div>
-                                                ))
-                                            ) : selectedNodeDetails.variables && Object.keys(selectedNodeDetails.variables).length > 0 ? (
-                                                /* Fallback to all variables if no usedVariables available */
-                                                <>
-                                                    <div className="text-xs text-muted-foreground mb-2">
-                                                        ⚠️ Used variables not available, showing all variables:
-                                                    </div>
-                                                    {Object.entries(selectedNodeDetails.variables).map(([key, value]) => (
-                                                        <div key={key} className="flex justify-between items-center p-2 bg-muted/50 rounded-md">
-                                                            <span className="font-mono text-sm font-medium">{key}</span>
-                                                            <span className="text-sm text-muted-foreground">
-                                                                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                                                            </span>
+                                                </div>
+                                            ) : selectedNodeDetails.usedVariables && Object.keys(selectedNodeDetails.usedVariables).length > 0 ? (
+                                                <div className="mt-1 space-y-1">
+                                                    {Object.entries(selectedNodeDetails.usedVariables).map(([varName, varValue]) => (
+                                                        <div key={varName} className="flex justify-between items-center p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                                                            <span className="font-medium text-green-800 dark:text-green-200">{varName}</span>
+                                                            <span className="text-green-600 dark:text-green-400">{String(varValue)}</span>
                                                         </div>
                                                     ))}
-                                                </>
+                                                </div>
                                             ) : (
-                                                <div className="text-center text-muted-foreground py-4">
-                                                    No variables available for this rule
+                                                <div className="mt-1 p-3 bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-800 rounded-md">
+                                                    <div className="text-sm text-gray-600 dark:text-gray-400 italic">
+                                                        No variables were used in this rule evaluation
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
-                                    </CardContent>
-                                )}
+                                    </div>
+                                </CardContent>
                             </Card>
+
+
+
 
                             {/* Action Status and Progress */}
                             {selectedNodeDetails.actionStatus && (

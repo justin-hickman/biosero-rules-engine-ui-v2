@@ -36,6 +36,8 @@ type ChainData = {
         to: string;
         type: 'success' | 'failure' | 'connection';
         label?: string;
+        style?: any;
+        animated?: boolean;
     }>;
 };
 
@@ -104,10 +106,10 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
     };
 
     const getNodeStyle = () => {
-        let baseClasses = "bg-white dark:bg-slate-800 border-2 rounded-lg shadow-md transition-all duration-200 min-w-[250px]";
+        let baseClasses = "bg-slate-800 border-2 rounded-lg shadow-lg transition-all duration-200 min-w-[250px]";
         
         // Base border color
-        let borderColor = isRule ? "border-blue-500" : "border-slate-300 dark:border-slate-600";
+        let borderColor = isRule ? "border-blue-500" : "border-slate-600";
         
         // Override border color based on status
         switch (data.status) {
@@ -118,7 +120,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                 borderColor = "border-red-500";
                 break;
             case 'pending': // NotRun state
-                borderColor = "border-gray-400";
+                borderColor = "border-gray-500";
                 break;
         }
         
@@ -146,7 +148,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
             <Handle
                 type="target"
                 position={Position.Left}
-                className="!bg-slate-400 !w-3 !h-3 !border-2 !border-white"
+                className="!bg-slate-500 !w-3 !h-3 !border-2 !border-slate-800"
             />
             
             <div className="p-3">
@@ -157,7 +159,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                         ) : (
                             <Lightning className={`w-4 h-4 ${getIconColor()} flex-shrink-0`} />
                         )}
-                        <span className="font-medium text-sm text-slate-900 dark:text-slate-100">
+                        <span className="font-medium text-sm text-white">
                             {data.label}
                         </span>
                     </div>
@@ -170,7 +172,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                     <div className={`text-xs ${getIconColor()} mt-1`}>
                         {data.actionType.replace(/([A-Z])/g, ' $1').trim()}
                         {data.templateName && (
-                            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            <div className="text-xs text-slate-300 mt-0.5">
                                 Template: {data.templateName}
                             </div>
                         )}
@@ -179,14 +181,14 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                 
                 
                 {data.duration && (
-                    <div className="text-xs text-slate-600 dark:text-slate-400 mt-2 flex items-center gap-1">
+                    <div className="text-xs text-slate-300 mt-2 flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         {data.duration}
                     </div>
                 )}
                 
                 {data.errorMessage && (
-                    <div className="text-xs text-red-600 dark:text-red-400 mt-2 line-clamp-2">
+                    <div className="text-xs text-red-400 mt-2 line-clamp-2">
                         {data.errorMessage}
                     </div>
                 )}
@@ -198,9 +200,9 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                         type="source"
                         position={Position.Right}
                         id="success"
-                        className="!bg-green-500 !w-3 !h-3 !border-2 !border-white !top-[35%]"
+                        className="!bg-green-500 !w-3 !h-3 !border-2 !border-slate-800 !top-[35%]"
                     />
-                    <div className="absolute right-[-35px] top-[30%] text-[10px] text-green-600 font-medium">
+                    <div className="absolute right-[-35px] top-[30%] text-[10px] text-green-400 font-medium">
                         ✓
                     </div>
                     
@@ -208,9 +210,9 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                         type="source"
                         position={Position.Right}
                         id="failure"
-                        className="!bg-red-500 !w-3 !h-3 !border-2 !border-white !top-[65%]"
+                        className="!bg-red-500 !w-3 !h-3 !border-2 !border-slate-800 !top-[65%]"
                     />
-                    <div className="absolute right-[-35px] top-[60%] text-[10px] text-red-600 font-medium">
+                    <div className="absolute right-[-35px] top-[60%] text-[10px] text-red-400 font-medium">
                         ✗
                     </div>
                 </>

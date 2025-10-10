@@ -24,6 +24,7 @@ interface SampleListProps {
     onSampleSelect: (sample: WorkflowContext) => void;
     refreshInterval?: number;
     onAutoRefreshChange?: (isAutoRefresh: boolean) => void;
+    isAutoRefresh?: boolean;
 }
 
 export function SampleList({
@@ -31,7 +32,8 @@ export function SampleList({
     selectedSampleId,
     onSampleSelect,
     refreshInterval = 3000,
-    onAutoRefreshChange
+    onAutoRefreshChange,
+    isAutoRefresh: externalAutoRefresh = false
 }: SampleListProps) {
     
     const [samples, setSamples] = useState<WorkflowContext[]>([]);
@@ -40,7 +42,12 @@ export function SampleList({
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'complete' | 'failed'>('all');
     const [dateFilter, setDateFilter] = useState<number | null>(null);
-    const [isAutoRefresh, setIsAutoRefresh] = useState(true);
+    const [isAutoRefresh, setIsAutoRefresh] = useState(externalAutoRefresh);
+    
+    // Sync with external auto refresh state
+    useEffect(() => {
+        setIsAutoRefresh(externalAutoRefresh);
+    }, [externalAutoRefresh]);
     
     // Notify parent of auto-refresh state changes
     useEffect(() => {
