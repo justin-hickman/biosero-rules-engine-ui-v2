@@ -107,15 +107,24 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
     const [activeProcessing, setActiveProcessing] = useState<any>(null);
     const [metricsLoading, setMetricsLoading] = useState(false);
 
-    // Load metrics when metrics tab is selected
+    // Load metrics when context is selected or metrics tab is selected
     React.useEffect(() => {
-        if (activeTab === 'metrics' && !systemMetrics && !metricsLoading) {
+        if (context && (!systemMetrics || !ruleStats || !activeProcessing) && !metricsLoading) {
+            console.log('🔧 ContextViewer: Fetching metrics for context:', context.contextId);
             setMetricsLoading(true);
             Promise.all([
                 rulesEngineService.getSystemMetrics(),
                 rulesEngineService.getRuleStats(),
                 rulesEngineService.getActiveProcessingStats()
             ]).then(([metrics, stats, processing]) => {
+                console.log('🔧 ContextViewer: Metrics loaded:', { metrics, stats, processing });
+                console.log('🔧 ContextViewer: Metrics structure check:', {
+                    metrics: metrics ? 'exists' : 'null',
+                    stats: stats ? 'exists' : 'null', 
+                    processing: processing ? 'exists' : 'null',
+                    statsStats: stats?.stats ? 'exists' : 'null',
+                    processingStats: processing?.processingStats ? 'exists' : 'null'
+                });
                 setSystemMetrics(metrics);
                 setRuleStats(stats);
                 setActiveProcessing(processing);
@@ -124,7 +133,7 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                 setMetricsLoading(false);
             });
         }
-    }, [activeTab, systemMetrics, metricsLoading, rulesEngineService]);
+    }, [context, systemMetrics, ruleStats, activeProcessing, metricsLoading, rulesEngineService]);
 
     if (!context) {
         return (

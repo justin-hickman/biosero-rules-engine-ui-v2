@@ -303,7 +303,7 @@ export class RulesEngineService {
             queryParams.append('page', (params?.page || 1).toString());
             queryParams.append('pageSize', (params?.pageSize || 100).toString());
             
-            const url = `${this.baseUrl}/contexts/rulechains?${queryParams}`;
+            const url = `${this.baseUrl}/api/UiMonitor/contexts?${queryParams}`;
             
             console.log('🌐 BRE API: Making request to:', {
                 url,
@@ -350,7 +350,7 @@ export class RulesEngineService {
                 
                 // If it's a 500 error, the new endpoint might not be implemented yet
                 if (response.status === 500) {
-                    console.log('🔄 500 Error: New /contexts/rulechains endpoint may not be implemented yet. Falling back to legacy behavior...');
+                    console.log('🔄 500 Error: New /api/UiMonitor/contexts endpoint may not be implemented yet. Falling back to legacy behavior...');
                     
                     // Return empty result for now - the UI will show "No samples" instead of crashing
                     return {
@@ -440,7 +440,7 @@ export class RulesEngineService {
     // Get specific rule chain by ID
     async getRuleChain(chainId: string): Promise<ChainContext | null> {
         try {
-            const response = await fetch(`${this.baseUrl}/contexts/rulechains/${chainId}`, {
+            const response = await fetch(`${this.baseUrl}/api/UiMonitor/contexts/${chainId}`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json'
@@ -501,7 +501,7 @@ export class RulesEngineService {
         try {
             console.log('🔍 BRE API: Fetching single chain context:', { chainId });
             
-            const url = `${this.baseUrl}/contexts/rulechains/${chainId}`;
+            const url = `${this.baseUrl}/api/UiMonitor/contexts/${chainId}`;
             const response = await fetch(url, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
@@ -570,7 +570,7 @@ export class RulesEngineService {
             if (params?.endTimestamp) queryParams.append('endTimestamp', params.endTimestamp);
             if (params?.contextId) queryParams.append('contextId', params.contextId);
 
-            const url = `${this.baseUrl}/contexts/rulechains?${queryParams.toString()}`;
+            const url = `${this.baseUrl}/api/UiMonitor/contexts?${queryParams.toString()}`;
             console.log(`🔍 BRE API: Fetching chain contexts:`, url);
             
             const response = await fetch(url);
@@ -777,7 +777,8 @@ export class RulesEngineService {
                     hasFailedRule: chain.ruleStatusHistory && chain.ruleStatusHistory.some(h => !h.isSuccess),
                     historyLength: chain.ruleStatusHistory?.length || 0,
                     mappedStatus: status,
-                    statusName: ContextStatus[status]
+                    statusName: ContextStatus[status],
+                    ruleStatusHistory: chain.ruleStatusHistory?.map(h => ({ ruleName: h.ruleName, isSuccess: h.isSuccess }))
                 });
                 
                 return {

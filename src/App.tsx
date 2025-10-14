@@ -4960,7 +4960,7 @@ function App() {
         
         toast.info('Chain updated (unsaved)');
     }, [setChainStartRuleId]);
-
+    
     // Reset auto-arrange flag after it's been used
     React.useEffect(() => {
         if (shouldAutoArrange) {
@@ -5055,9 +5055,9 @@ function App() {
     const saveChainToDataServices = React.useCallback(async () => {
         if (!ruleChainData || !dataServicesRootURI) {
             toast.error("No chain data or Data Services URL configured");
-            return;
+                return;
         }
-
+        
         setIsLoading(prev => ({ ...prev, chainData: true }));
         
         try {
@@ -5082,35 +5082,35 @@ function App() {
                         id: node.ruleId || node.id,
                         name: node.label || `Rule ${node.id}`,
                         description: node.description || `Rule from chain: ${node.label}`,
-                        typeIdentifier: "Business Rule",
-                        properties: [
-                            {
-                                name: "RuleExpressionType",
-                                value: "LambdaExpression",
-                                valueType: "String"
-                            },
-                            {
-                                name: "Expression",
+                            typeIdentifier: "Business Rule",
+                            properties: [
+                                {
+                                    name: "RuleExpressionType",
+                                    value: "LambdaExpression",
+                                    valueType: "String"
+                                },
+                                {
+                                    name: "Expression",
                                 value: node.expression || "",
-                                valueType: "String"
-                            },
-                            {
-                                name: "ErrorMessage",
-                                value: "",
-                                valueType: "String"
-                            },
-                            {
-                                name: "OnSuccess",
+                                    valueType: "String"
+                                },
+                                {
+                                    name: "ErrorMessage",
+                                    value: "",
+                                    valueType: "String"
+                                },
+                                {
+                                    name: "OnSuccess",
                                 value: { Actions: onSuccess },
-                                valueType: "String"
-                            },
-                            {
-                                name: "OnFailure",
+                                    valueType: "String"
+                                },
+                                {
+                                    name: "OnFailure",
                                 value: { Actions: onFailure },
-                                valueType: "String"
-                            }
-                        ]
-                    };
+                                    valueType: "String"
+                                }
+                            ]
+                        };
 
                     // Save the individual rule
                     const result = await apiUploadRule(dataServicesRootURI, rule);

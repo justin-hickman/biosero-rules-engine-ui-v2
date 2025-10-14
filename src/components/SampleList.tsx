@@ -147,19 +147,32 @@ export const SampleList = React.memo(function SampleList({
             if (response.success && response.items && response.items.length > 0) {
                 // Convert rich payload to samples
                 const newSamples = response.items.map(chain => {
+                    // Debug the chain structure
+                    console.log('📊 Monitor: Processing chain:', {
+                        chainId: chain.chainId,
+                        variables: chain.variables,
+                        status: chain.status,
+                        isActive: chain.isActive,
+                        isComplete: chain.isComplete
+                    });
+                    
                     // Extract sample info from the rich payload
-                    const sampleId = chain.variables?.SampleId || chain.variables?.OrderId || `Sample ${chain.chainId.slice(-4)}`;
+                    const chainId = chain.chainId || 'unknown';
+                    // Handle both uppercase and lowercase variable names
+                    const sampleId = chain.variables?.SampleId || chain.variables?.sampleId || 
+                                   chain.variables?.OrderId || chain.variables?.orderId || 
+                                   `Sample ${chainId.slice(-4)}`;
                     const status = chain.isComplete ? 
                         (chain.status === 'Failed' ? 3 : 2) : // Failed or Complete
                         (chain.isActive ? 1 : 0); // Active or Ready
                     
                     return {
-                        contextId: chain.chainId,
+                        contextId: chainId,
                         sampleId: sampleId,
                         status: status as ContextStatus,
                         lastUpdatedAt: chain.startTimestamp,
                         createdAt: chain.startTimestamp, // Add required createdAt property
-                        chainId: chain.chainId,
+                        chainId: chainId,
                         // Add rich metadata
                         chainStatus: chain.status,
                         isActive: chain.isActive,
@@ -258,6 +271,16 @@ export const SampleList = React.memo(function SampleList({
         const filtered = samples.filter(sample => {
             // Status filter
         if (filterStatusRef.current !== 'all') {
+                console.log('🔍 SampleList: Filtering sample:', {
+                    sampleId: sample.sampleId,
+                    status: sample.status,
+                    statusName: ContextStatus[sample.status],
+                    filterStatus: filterStatusRef.current,
+                    shouldInclude: filterStatusRef.current === 'active' ? (sample.status === ContextStatus.Active || sample.status === ContextStatus.Running) :
+                                 filterStatusRef.current === 'complete' ? (sample.status === ContextStatus.Complete) :
+                                 filterStatusRef.current === 'failed' ? (sample.status === ContextStatus.Failed) : true
+                });
+                
                 if (filterStatusRef.current === 'active' && sample.status !== ContextStatus.Active && sample.status !== ContextStatus.Running) {
                     return false;
                 }
@@ -494,7 +517,7 @@ export const SampleList = React.memo(function SampleList({
             </div>
 
             {/* Content with ScrollArea */}
-                {!isLoading && !error && totalCount > 0 && (
+            {!isLoading && !error && totalCount > 0 && (
                 <ScrollArea className="flex-1">
                     <div className="pl-8 pr-6 py-4 space-y-4">
                         {/* Active/Running Group */}
@@ -619,8 +642,8 @@ export const SampleList = React.memo(function SampleList({
                             {searchTerm ? 'Try adjusting your search terms' : 'No samples match your current filters'}
                         </div>
                     </div>
-                    </div>
-                )}
+                </div>
+            )}
         </div>
     );
 });
