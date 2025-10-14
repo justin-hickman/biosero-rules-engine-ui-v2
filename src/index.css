@@ -190,7 +190,7 @@ body {
 }
 
 .react-flow__edge.animated path {
-  stroke-dasharray: 5;
+  /* stroke-dasharray removed - let inline styles control it */
   animation: dashdraw 0.5s linear infinite;
 }
 

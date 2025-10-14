@@ -158,9 +158,16 @@ const RuleNode: React.FC<NodeProps> = ({ data, isConnectable, selected, id }) =>
                 <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2">
                         <GitBranch className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                        <span className="font-medium text-sm text-slate-900 dark:text-slate-100">
-                            {nodeData.label || 'Rule'}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                            <span className="font-bold text-base text-slate-900 dark:text-slate-100">
+                                {nodeData.label || 'Rule'}
+                            </span>
+                            {nodeData.ruleId && (
+                                <span className="text-xs italic text-slate-600 dark:text-slate-400">
+                                    {nodeData.ruleId}
+                                </span>
+                            )}
+                        </div>
                     </div>
                     {!nodeData.readonly && (
                         <div className="flex gap-1">

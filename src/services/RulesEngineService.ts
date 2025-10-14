@@ -692,14 +692,33 @@ export class RulesEngineService {
                     } catch {}
                 });
                 
-                // Extract sample info from variables - try multiple locations
-                if (chain.variables?.orchestratorWorkflowActionVariables?.sampleId) {
-                    sampleId = chain.variables.orchestratorWorkflowActionVariables.sampleId;
-                } else if (chain.variables?.sampleId) {
+                // Extract sample ID from variables with proper nested parsing
+                // Priority 1: Main level
+                if (chain.variables?.sampleId) {
                     sampleId = chain.variables.sampleId;
                 } else if (chain.variables?.SampleId) {
                     sampleId = chain.variables.SampleId;
-                } else if (chain.variables?.sample) {
+                } 
+                // Priority 2: orchestratorWorkflowActionVariables
+                else if (chain.variables?.orchestratorWorkflowActionVariables?.sampleId) {
+                    sampleId = chain.variables.orchestratorWorkflowActionVariables.sampleId;
+                } else if (chain.variables?.orchestratorWorkflowActionVariables?.SampleId) {
+                    sampleId = chain.variables.orchestratorWorkflowActionVariables.SampleId;
+                }
+                // Priority 3: workflowVariables
+                else if (chain.variables?.workflowVariables?.sampleId) {
+                    sampleId = chain.variables.workflowVariables.sampleId;
+                } else if (chain.variables?.workflowVariables?.SampleId) {
+                    sampleId = chain.variables.workflowVariables.SampleId;
+                }
+                // Priority 4: gbgSchedulerActionVariables
+                else if (chain.variables?.gbgSchedulerActionVariables?.sampleId) {
+                    sampleId = chain.variables.gbgSchedulerActionVariables.sampleId;
+                } else if (chain.variables?.gbgSchedulerActionVariables?.SampleId) {
+                    sampleId = chain.variables.gbgSchedulerActionVariables.SampleId;
+                }
+                // Fallback: generic sample/Sample keys
+                else if (chain.variables?.sample) {
                     sampleId = chain.variables.sample;
                 } else if (chain.variables?.Sample) {
                     sampleId = chain.variables.Sample;

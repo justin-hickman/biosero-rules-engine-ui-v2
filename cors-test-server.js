@@ -15,107 +15,7 @@ const url = require('url');
 
 const port = process.argv[2] || 8105;
 
-// Sample data
-const sampleRules = [
-    {
-        identifier: "RULE12345",
-        id: "RULE12345", 
-        name: "Sample Business Rule",
-        description: "A sample rule for testing",
-        typeIdentifier: "Business Rule",
-        properties: [
-            {
-                name: "RuleExpressionType",
-                value: "LambdaExpression",
-                valueType: "String"
-            },
-            {
-                name: "Expression", 
-                value: "key == 'Ready' AND Convert.ToDouble(value) > 0.5",
-                valueType: "String"
-            },
-            {
-                name: "ErrorMessage",
-                value: "Rule evaluation failed",
-                valueType: "String"
-            },
-            {
-                name: "OnSuccess",
-                value: JSON.stringify({
-                    Actions: [{
-                        ActionType: "ExecuteOrchestratorWorkflowAction",
-                        TemplateName: "ProcessSample",
-                        RuleName: "Rule1",
-                        Status: "Success",
-                        Timestamp: "2023-05-15T10:30:00Z"
-                    }]
-                }),
-                valueType: "String"
-            },
-            {
-                name: "OnFailure", 
-                value: JSON.stringify({
-                    Actions: [{
-                        ActionType: "SendEmailNotificationAction",
-                        Recipient: "admin@example.com",
-                        Subject: "Rule Failed",
-                        RuleName: "Rule1", 
-                        Status: "Success",
-                        Timestamp: "2023-05-15T10:35:00Z"
-                    }]
-                }),
-                valueType: "String"
-            }
-        ]
-    },
-    {
-        identifier: "RULE67890",
-        id: "RULE67890",
-        name: "Another Test Rule", 
-        description: "Another sample rule",
-        typeIdentifier: "Business Rule",
-        properties: [
-            {
-                name: "RuleExpressionType",
-                value: "LambdaExpression", 
-                valueType: "String"
-            },
-            {
-                name: "Expression",
-                value: "status == 'Complete'",
-                valueType: "String"
-            },
-            {
-                name: "ErrorMessage",
-                value: "Status check failed",
-                valueType: "String"
-            },
-            {
-                name: "OnSuccess",
-                value: JSON.stringify({ Actions: [] }),
-                valueType: "String"
-            },
-            {
-                name: "OnFailure",
-                value: JSON.stringify({ Actions: [] }),
-                valueType: "String"
-            }
-        ]
-    }
-];
-
-const sampleOrderTemplates = [
-    {
-        name: "ProcessSample",
-        description: "Sample processing workflow",
-        parameters: ["sampleId", "priority"]
-    },
-    {
-        name: "QualityCheck", 
-        description: "Quality assurance workflow",
-        parameters: ["batchId", "checkType"]
-    }
-];
+// No sample data - using real API endpoints
 
 // CORS middleware
 const addCorsHeaders = (res) => {
@@ -189,28 +89,15 @@ const server = http.createServer(async (req, res) => {
 
         // List rules (with optional typeIdentifier filter)
         if (pathname === '/api/v3.0/identities' && method === 'GET') {
-            let rules = sampleRules;
-            
-            if (query.typeIdentifier) {
-                const typeFilter = decodeURIComponent(query.typeIdentifier);
-                rules = sampleRules.filter(rule => rule.typeIdentifier === typeFilter);
-            }
-            
-            sendJSON(res, rules);
+            // Return empty array - no hardcoded rules
+            sendJSON(res, []);
             return;
         }
 
         // Get specific rule
         if (pathname.startsWith('/api/v3.0/identities/') && method === 'GET') {
             const ruleId = pathname.split('/').pop();
-            const rule = sampleRules.find(r => r.identifier === ruleId || r.id === ruleId);
-            
-            if (!rule) {
-                sendError(res, `Rule not found: ${ruleId}`, 404);
-                return;
-            }
-            
-            sendJSON(res, rule);
+            sendError(res, `Rule not found: ${ruleId}`, 404);
             return;
         }
 
@@ -232,21 +119,14 @@ const server = http.createServer(async (req, res) => {
 
         // List order templates
         if (pathname === '/api/v3.0/order-templates' && method === 'GET') {
-            sendJSON(res, sampleOrderTemplates);
+            sendJSON(res, []);
             return;
         }
 
         // Get specific order template
         if (pathname.startsWith('/api/v3.0/order-templates/') && method === 'GET') {
             const templateName = decodeURIComponent(pathname.split('/').pop());
-            const template = sampleOrderTemplates.find(t => t.name === templateName);
-            
-            if (!template) {
-                sendError(res, `Template not found: ${templateName}`, 404);
-                return;
-            }
-            
-            sendJSON(res, template);
+            sendError(res, `Template not found: ${templateName}`, 404);
             return;
         }
 

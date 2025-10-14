@@ -143,7 +143,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                         isCurrent: rule.identifier === chainContext.currentRuleName,
                         lastEvaluatedAt: rule.lastEvaluatedAt,
                         variables: variables,
-                        position: { x: 0, y: index * 120 } // Stack vertically with closer spacing
+                        position: { x: 0, y: 0 } // Will be calculated by layout algorithm
                     };
                     
                     ruleExpressions[rule.identifier] = `Expression for ${rule.name}`;
@@ -308,18 +308,13 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 });
             }
             
-            // For now, let's create a complete chain based on the expected pattern
-            // This is a temporary solution until we can get the complete chain from the API
-            const expectedRules = [
-                '000_AutomatedBRETest',      // Rule 1
-                '000_AutomatedBRETest2',     // Rule 2  
-                '000_AutomatedBRETest3',     // Rule 3
-                '000_AutomatedBRETest4'      // Rule 4
-            ];
-            
-            expectedRules.forEach(ruleName => {
-                allRuleNames.add(ruleName);
-            });
+            // Use chainStructure from API payload to get complete rule set
+            if (chainContext.chainStructure?.edges) {
+                chainContext.chainStructure.edges.forEach((edge: any) => {
+                    allRuleNames.add(edge.from);
+                    allRuleNames.add(edge.to);
+                });
+            }
             
             // Create a complete rules array including missing rules
             const completeRules = [...chainContext.rules];
@@ -328,17 +323,8 @@ export const SampleMonitor = React.memo(function SampleMonitor({
             Array.from(allRuleNames).forEach(ruleName => {
                 if (!chainContext.rules.find(r => r.identifier === ruleName)) {
                     // Create a rule entry for missing rules
-                    // Determine status based on rule position and execution
+                    // Default status for missing rules
                     let status = 'NotRun';
-                    if (ruleName === '000_AutomatedBRETest') {
-                        status = 'Success'; // Rule 1 is completed
-                    } else if (ruleName === '000_AutomatedBRETest2') {
-                        status = 'Success'; // Rule 2 is completed
-                    } else if (ruleName === '000_AutomatedBRETest3') {
-                        status = 'Success'; // Rule 3 is completed
-                    } else if (ruleName === '000_AutomatedBRETest4') {
-                        status = 'NotRun'; // Rule 4 is pending
-                    }
                     
                     completeRules.push({
                         identifier: ruleName,
@@ -385,12 +371,13 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 nodes[rule.identifier] = {
                     id: rule.identifier,
                     label: rule.name,
+                    ruleName: rule.name,
                     ruleId: rule.identifier,
                     status: nodeStatus,
                     isCurrent: rule.identifier === chainContext.currentRuleName,
                     lastEvaluatedAt: rule.lastEvaluatedAt,
                     // Add position for visualization
-                    position: { x: 0, y: index * 120 }
+                    position: { x: 0, y: 0 } // Will be calculated by layout algorithm
                 };
             });
         } else {
@@ -405,11 +392,12 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     nodes[ruleName] = {
                         id: ruleName,
                         label: ruleName,
+                        ruleName: ruleName,
                         ruleId: ruleName,
                         status: nodeStatus,
                         isCurrent: ruleName === chainContext.currentRuleName,
-                        // Add position for visualization - stack vertically with spacing
-                        position: { x: 0, y: index * 120 }
+                        // Add position for visualization - will be calculated by layout algorithm
+                        position: { x: 0, y: 0 }
                     };
                 });
             } else {
@@ -426,10 +414,11 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                         nodes[ruleName] = {
                             id: ruleName,
                             label: ruleName,
+                            ruleName: ruleName,
                             ruleId: ruleName,
                             status: ruleName === chainContext.currentRuleName ? 'processing' : 'pending',
                             isCurrent: ruleName === chainContext.currentRuleName,
-                            position: { x: 0, y: index * 120 }
+                            position: { x: 0, y: 0 } // Will be calculated by layout algorithm
                         };
                     });
                 } else {
@@ -446,99 +435,58 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                             ruleId: ruleName,
                             status: ruleName === chainContext.currentRuleName ? 'processing' : 'pending',
                             isCurrent: ruleName === chainContext.currentRuleName,
-                            position: { x: 0, y: index * 120 }
+                            position: { x: 0, y: 0 } // Will be calculated by layout algorithm
                         };
                     });
                 }
             }
         }
         
-        // Add edges from chainStructure to show connections
+        
+        // Use chainStructure edges from API payload instead of hardcoded edges
         if (chainContext.chainStructure?.edges) {
             chainContext.chainStructure.edges.forEach((edge: any) => {
-                // Get source node status to determine edge color
-                // Handle case sensitivity - ruleStatusMap uses lowercase keys
-                const sourceStatus = chainContext.ruleStatusMap?.[edge.from.toLowerCase()] || 
-                                   chainContext.ruleStatusMap?.[edge.from] || 
-                                   'NotRun';
-                
-                // Determine edge color and style based on edge type and source status
-                let edgeColor = '#6b7280'; // Default gray
-                let strokeWidth = 3;
+                // Only add edge if both nodes exist
+                if (nodes[edge.from] && nodes[edge.to]) {
+                    const sourceStatus = nodes[edge.from].status;
+                    
+                    // Determine if this edge is on the executed path
+                    const isExecutedPath = (
+                        (edge.type === 'success' && sourceStatus === 'success') ||
+                        (edge.type === 'failure' && sourceStatus === 'failed')
+                    );
+                    
+                    // Edge styling based on execution path
+                    let edgeColor = '#374151'; // Muted gray for non-executed paths
+                    let strokeWidth = 2;
                 let animated = false;
-                let strokeDasharray = undefined;
-                
-                if (edge.type === 'success') {
-                    edgeColor = '#10b981'; // Green for success paths
-                    animated = sourceStatus === 'Success'; // Animate only from completed rules
-                } else if (edge.type === 'failure') {
-                    edgeColor = '#ef4444'; // Red for failure paths
-                    strokeDasharray = '5,5'; // Dashed line for failure paths
-                    animated = sourceStatus === 'Failed'; // Animate only from failed rules
-                } else {
-                    // Connection type - use source status color
-                    if (sourceStatus === 'Success') {
-                        edgeColor = '#10b981'; // Green
-                        animated = true;
-                    } else if (sourceStatus === 'Failed') {
-                        edgeColor = '#ef4444'; // Red
-                        strokeDasharray = '5,5'; // Dashed for failed connections
+                    
+                    if (isExecutedPath) {
+                        // Executed path - use vibrant colors
+                        edgeColor = edge.type === 'success' ? '#10b981' : '#ef4444';
+                        strokeWidth = 3;
                     }
+                    
+                    // Animate ONLY for running actions (pending target after executed source)
+                    const targetStatus = nodes[edge.to]?.status;
+                    if (isExecutedPath && targetStatus === 'pending') {
+                        animated = true;
                 }
                 
                 edges.push({
                     from: edge.from,
                     to: edge.to,
-                    type: edge.type as 'success' | 'failure' | 'connection',
+                        type: edge.type,
                     style: { 
                         stroke: edgeColor, 
                         strokeWidth: strokeWidth,
-                        strokeDasharray: strokeDasharray
+                            strokeDasharray: undefined // Always solid lines
                     },
                     animated: animated
                 });
+                }
             });
         }
-        
-        // Create edges for the complete chain (rules 1->2->3->4)
-        const completeChainEdges = [
-            { from: '000_AutomatedBRETest', to: '000_AutomatedBRETest2', type: 'success' },
-            { from: '000_AutomatedBRETest2', to: '000_AutomatedBRETest3', type: 'success' },
-            { from: '000_AutomatedBRETest3', to: '000_AutomatedBRETest4', type: 'success' }
-        ];
-        
-        completeChainEdges.forEach((edge: any) => {
-            // Only add edge if both nodes exist
-            if (nodes[edge.from] && nodes[edge.to]) {
-                const sourceStatus = nodes[edge.from].status;
-                
-                // Determine edge color and style based on source status
-                let edgeColor = '#6b7280'; // Default gray
-                let strokeWidth = 3;
-                let animated = false;
-                let strokeDasharray = undefined;
-                
-                if (sourceStatus === 'success') {
-                    edgeColor = '#10b981'; // Green for success paths
-                    animated = true;
-                } else if (sourceStatus === 'failed') {
-                    edgeColor = '#ef4444'; // Red for failure paths
-                    strokeDasharray = '5,5'; // Dashed line for failure paths
-                }
-                
-                edges.push({
-                    from: edge.from,
-                    to: edge.to,
-                    type: edge.type as 'success' | 'failure' | 'connection',
-                    style: { 
-                        stroke: edgeColor, 
-                        strokeWidth: strokeWidth,
-                        strokeDasharray: strokeDasharray
-                    },
-                    animated: animated
-                });
-            }
-        });
         
         console.log('🔧 Monitor: Built chain data from payload:', {
             nodesCount: Object.keys(nodes).length,
@@ -946,7 +894,10 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Code className="w-5 h-5" />
-                            🚀 Execution Details: {selectedNodeDetails?.nodeId}
+                            <div className="flex flex-col">
+                                <span className="font-bold">{selectedNodeDetails?.ruleName || selectedNodeDetails?.nodeId}</span>
+                                <span className="text-sm italic text-muted-foreground">{selectedNodeDetails?.ruleId || selectedNodeDetails?.nodeId}</span>
+                            </div>
                         </DialogTitle>
                     </DialogHeader>
                     

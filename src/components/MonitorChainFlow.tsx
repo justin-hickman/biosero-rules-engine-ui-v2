@@ -14,6 +14,7 @@ import {
     Handle
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import dagre from 'dagre';
 import { cn } from '../lib/utils';
 import { Badge } from '../components/ui/badge';
 import { Tooltip } from '../components/ui/tooltip';
@@ -159,9 +160,16 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                         ) : (
                             <Lightning className={`w-4 h-4 ${getIconColor()} flex-shrink-0`} />
                         )}
-                        <span className="font-medium text-sm text-white">
-                            {data.label}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                            <span className="font-bold text-base text-white">
+                                {data.ruleName || data.label}
+                            </span>
+                            {data.ruleId && (
+                                <span className="text-xs italic text-slate-400">
+                                    {data.ruleId}
+                                </span>
+                            )}
+                        </div>
                     </div>
                     <div className="flex items-center gap-2">
                         {getStatusIcon()}
@@ -223,6 +231,134 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
 
 const nodeTypes = {
     monitor: MonitorNode,
+};
+
+// Grid snapping utility
+const snapToGrid = (position: { x: number; y: number }, gridSize = 15) => ({
+    x: Math.round(position.x / gridSize) * gridSize,
+    y: Math.round(position.y / gridSize) * gridSize,
+});
+
+// Auto-layout function using dagre with success/failure path prioritization
+const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'LR') => {
+    const dagreGraph = new dagre.graphlib.Graph();
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
+    
+    const nodeWidth = 250; // Matches MonitorNode min-width
+    const nodeHeight = 100;
+    
+    // Configure for dramatically tighter layout
+    dagreGraph.setGraph({ 
+        rankdir: direction, 
+        nodesep: 3, // REDUCED vertical spacing between nodes in same rank by 4x (was 12, now 3)
+        ranksep: 200, // REDUCED horizontal spacing between ranks (was 1250, now 200)
+        edgesep: 80,  // Restored original spacing between edges
+        ranker: 'network-simplex', // Better algorithm for complex graphs
+        align: 'DL'   // Align nodes down-left for cleaner look
+    });
+    
+    nodes.forEach((node) => {
+        dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+    });
+    
+    edges.forEach((edge) => {
+        // Give different weights to success/failure paths for better visual separation
+        const weight = edge.sourceHandle === 'failure' ? 2 : 1;
+        dagreGraph.setEdge(edge.source, edge.target, { weight });
+    });
+    
+    dagre.layout(dagreGraph);
+    
+    // First, get the basic dagre layout
+    const newNodes = nodes.map((node) => {
+        const nodeWithPosition = dagreGraph.node(node.id);
+        const newNode = {
+            ...node,
+            targetPosition: Position.Left,
+            sourcePosition: Position.Right,
+            position: snapToGrid({
+                x: nodeWithPosition.x - nodeWidth / 2,
+                y: nodeWithPosition.y - nodeHeight / 2,
+            }),
+        };
+        
+        return newNode;
+    });
+    
+    // Now adjust Y positions to ensure success paths are on top and failure paths are on bottom
+    // Group nodes by their X position (rank/column)
+    const nodesByRank = new Map<number, Node[]>();
+    newNodes.forEach(node => {
+        const x = Math.round(node.position.x / 50) * 50; // Group by approximate X position
+        if (!nodesByRank.has(x)) {
+            nodesByRank.set(x, []);
+        }
+        nodesByRank.get(x)!.push(node);
+    });
+    
+    // For each rank, separate nodes into success-path and failure-path groups
+    nodesByRank.forEach((nodesInRank, x) => {
+        if (nodesInRank.length <= 1) return; // Skip if only one node in this rank
+        
+        const successNodes: Node[] = [];
+        const failureNodes: Node[] = [];
+        const neutralNodes: Node[] = [];
+        
+        // Categorize nodes based on their incoming edges
+        nodesInRank.forEach(node => {
+            const incomingEdges = edges.filter(e => e.target === node.id);
+            
+            if (incomingEdges.length === 0) {
+                // No incoming edges - likely a root node
+                neutralNodes.push(node);
+            } else {
+                // Check if this node is reached primarily through success or failure paths
+                const hasSuccessPath = incomingEdges.some(e => e.sourceHandle === 'success');
+                const hasFailurePath = incomingEdges.some(e => e.sourceHandle === 'failure');
+                
+                if (hasSuccessPath && !hasFailurePath) {
+                    successNodes.push(node);
+                } else if (hasFailurePath && !hasSuccessPath) {
+                    failureNodes.push(node);
+                } else {
+                    // Mixed or neutral paths
+                    neutralNodes.push(node);
+                }
+            }
+        });
+        
+        // Sort each group by their current Y position to maintain relative order
+        successNodes.sort((a, b) => a.position.y - b.position.y);
+        neutralNodes.sort((a, b) => a.position.y - b.position.y);
+        failureNodes.sort((a, b) => a.position.y - b.position.y);
+        
+        // Calculate new Y positions with EXTREMELY decreased spacing
+        const totalNodes = successNodes.length + neutralNodes.length + failureNodes.length;
+        const totalHeight = (totalNodes - 1) * (nodeHeight + 1); // EXTREMELY decreased to 1px spacing between nodes
+        const startY = -totalHeight / 2;
+        
+        let currentY = startY;
+        
+        // Position success nodes at the top
+        successNodes.forEach(node => {
+            node.position.y = currentY;
+            currentY += nodeHeight + 1; // EXTREMELY decreased spacing
+        });
+        
+        // Position neutral nodes in the middle
+        neutralNodes.forEach(node => {
+            node.position.y = currentY;
+            currentY += nodeHeight + 1; // EXTREMELY decreased spacing
+        });
+        
+        // Position failure nodes at the bottom
+        failureNodes.forEach(node => {
+            node.position.y = currentY;
+            currentY += nodeHeight + 1; // EXTREMELY decreased spacing
+        });
+    });
+    
+    return { nodes: newNodes, edges };
 };
 
 function MonitorChainFlowInner({
@@ -366,7 +502,7 @@ function MonitorChainFlowInner({
                 const isActivePath = isExecuted && (
                     (edge.type === 'success' && sourceStatus === 'success') ||
                     (edge.type === 'failure' && sourceStatus === 'failed')
-                ) && (targetStatus !== 'pending');
+                );
 
                 // For action nodes, inherit status from their source rule if executed
                 if (targetNode?.actionType && isActivePath) {
@@ -391,23 +527,20 @@ function MonitorChainFlowInner({
                     target: edge.to,
                     sourceHandle: edge.type,
                     targetHandle: undefined,
-                    type: 'smoothstep',
-                    animated: edgeAnimated,
+                    type: 'default', // Bezier curves instead of smoothstep
+                    animated: isActivePath, // Animate executed paths
                     style: {
-                        stroke: edgeStyle.stroke || (isActivePath 
-                            ? (edge.type === 'success' ? '#10b981' : '#dc2626')
-                            : '#64748b'), // More muted gray for inactive paths
-                        strokeWidth: edgeStyle.strokeWidth || 3, // Always use 3 for consistency
-                        opacity: isExecuted ? 1 : 0.2, // More muted opacity for inactive paths
-                        strokeDasharray: edgeStyle.strokeDasharray || (targetNode?.actionType ? '5,5' : undefined)
+                        stroke: (edge.type === 'success' ? '#22c55e' : edge.type === 'failure' ? '#ef4444' : '#22c55e'), // Brighter green to match node handle color
+                        strokeWidth: 4, // More reasonable stroke width
+                        opacity: 1, // Always visible for testing
+                        strokeDasharray: undefined, // NO dashed lines
+                        filter: undefined // NO haze/glow effect
                     },
                     markerEnd: {
                         type: MarkerType.ArrowClosed,
-                        color: edgeStyle.stroke || (isActivePath 
-                            ? (edge.type === 'success' ? '#10b981' : '#dc2626')
-                            : '#64748b'), // More muted gray for inactive paths
-                        width: 10,
-                        height: 10,
+                        color: (edge.type === 'success' ? '#22c55e' : edge.type === 'failure' ? '#ef4444' : '#22c55e'), // Brighter green to match node handle color
+                        width: 8, // More proportional arrow size
+                        height: 8,
                     },
                 });
             });
@@ -442,16 +575,19 @@ function MonitorChainFlowInner({
                         source: prevNodeId,
                         target: ruleNodeId,
                         sourceHandle: prevResult.isSuccess ? 'success' : 'failure',
-                        type: 'smoothstep',
+                        type: 'default', // Bezier curves
+                        animated: true, // Animate executed paths
                         style: {
-                            stroke: prevResult.isSuccess ? '#10b981' : '#dc2626',
-                            strokeWidth: 3,
+                            stroke: prevResult.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors: pure green and red
+                            strokeWidth: 25, // EXTREMELY bold stroke
+                            strokeDasharray: '12,6', // EXTREMELY bold dashed pattern
+                            filter: 'drop-shadow(0 0 20px currentColor) brightness(2) saturate(2)', // EXTREME glow effect
                         },
                         markerEnd: {
                             type: MarkerType.ArrowClosed,
-                            color: prevResult.isSuccess ? '#10b981' : '#dc2626',
-                            width: 10,
-                            height: 10,
+                            color: prevResult.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors
+                            width: 30, // EXTREMELY large arrows
+                            height: 30,
                         },
                     });
                 }
@@ -483,17 +619,19 @@ function MonitorChainFlowInner({
                             source: ruleNodeId,
                             target: actionNodeId,
                             sourceHandle: result.isSuccess ? 'success' : 'failure',
-                            type: 'smoothstep',
+                            type: 'default', // Bezier curves
+                            animated: true, // Animate executed paths
                             style: {
-                                stroke: result.isSuccess ? '#10b981' : '#dc2626',
-                                strokeWidth: 2,
-                                strokeDasharray: '5,5',
+                                stroke: result.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors: pure green and red
+                                strokeWidth: 20, // EXTREMELY bold stroke
+                                strokeDasharray: '10,5', // EXTREMELY bold dashed pattern
+                                filter: 'drop-shadow(0 0 15px currentColor) brightness(2) saturate(2)', // EXTREME glow effect
                             },
                             markerEnd: {
                                 type: MarkerType.ArrowClosed,
-                                color: result.isSuccess ? '#10b981' : '#dc2626',
-                                width: 15,
-                                height: 15,
+                                color: result.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors
+                                width: 35, // EXTREMELY large arrows
+                                height: 35,
                             },
                         });
                         
@@ -528,17 +666,19 @@ function MonitorChainFlowInner({
                         source: prevNodeId,
                         target: currentRuleName,
                         sourceHandle: lastResult.isSuccess ? 'success' : 'failure',
-                        type: 'smoothstep',
+                        type: 'default', // Bezier curves
                         animated: true,
                         style: {
-                            stroke: lastResult.isSuccess ? '#10b981' : '#dc2626',
-                            strokeWidth: 3,
+                            stroke: lastResult.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors: pure green and red
+                            strokeWidth: 25, // EXTREMELY bold stroke
+                            strokeDasharray: '12,6', // EXTREMELY bold dashed pattern
+                            filter: 'drop-shadow(0 0 20px currentColor) brightness(2) saturate(2)', // EXTREME glow effect
                         },
                         markerEnd: {
                             type: MarkerType.ArrowClosed,
-                            color: lastResult.isSuccess ? '#10b981' : '#dc2626',
-                            width: 10,
-                            height: 10,
+                            color: lastResult.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors
+                            width: 30, // EXTREMELY large arrows
+                            height: 30,
                         },
                     });
                 }
@@ -551,6 +691,12 @@ function MonitorChainFlowInner({
             nodes: newNodes.map(n => ({ id: n.id, label: n.data.label, status: n.data.status })),
             edges: newEdges.map(e => ({ from: e.source, to: e.target, type: e.type }))
         });
+
+        // Apply dagre layout algorithm for proper hierarchical arrangement
+        if (newNodes.length > 0) {
+            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(newNodes, newEdges, 'LR');
+            return { nodes: layoutedNodes, edges: layoutedEdges };
+        }
 
         return { nodes: newNodes, edges: newEdges };
     }, [chainData, executionHistory, currentRuleName]);
@@ -589,12 +735,12 @@ function MonitorChainFlowInner({
                     nodes: nodes.filter(n => !n.data.isAction) // Only fit view to rule nodes, not action nodes
                 }}
                 defaultEdgeOptions={{
-                    type: 'smoothstep',
+                    type: 'default', // Changed from smoothstep to default (Bezier)
                     style: { 
-                        strokeWidth: 3
-                        // Don't set default stroke color - let individual edges set their own
+                        strokeWidth: 2, // Default stroke width for inactive edges
+                        opacity: 1 // Full opacity for all edges
                     },
-                    animated: false
+                    animated: false // Individual edges will override this
                 }}
                 minZoom={0.1}
                 maxZoom={2}
