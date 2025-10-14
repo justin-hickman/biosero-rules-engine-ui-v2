@@ -105,7 +105,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
     const getStatusIcon = () => {
         switch (data.status) {
             case 'success':
-                return <CheckCircle className="w-4 h-4 text-green-500" weight="fill" />;
+                return <CheckCircle className="w-4 h-4" weight="fill" style={{ color: '#00D437' }} />;
             case 'failed':
                 return <XCircle className="w-4 h-4 text-red-500" weight="fill" />;
             case 'pending': // NotRun state
@@ -124,7 +124,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
         // Override border color based on status
         switch (data.status) {
             case 'success':
-                borderColor = "border-green-500";
+                borderColor = "border-[#00D437]";
                 break;
             case 'failed':
                 borderColor = "border-red-500";
@@ -217,9 +217,10 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                         type="source"
                         position={Position.Right}
                         id="success"
-                        className="!bg-green-500 !w-3 !h-3 !border-2 !border-slate-800 !top-[35%]"
+                        className="!w-3 !h-3 !border-2 !border-slate-800 !top-[35%]"
+                        style={{ backgroundColor: '#00D437' }}
                     />
-                    <div className="absolute right-[-35px] top-[30%] text-[10px] text-green-400 font-medium">
+                    <div className="absolute right-[-35px] top-[30%] text-[10px] font-medium" style={{ color: '#00D437' }}>
                         ✓
                     </div>
                     
@@ -401,25 +402,31 @@ function MonitorChainFlowInner({
         const nodeStatuses: Record<string, NodeStatus> = {};
         
         // Use new ChainContext data if available
-        if (chainContext?.ruleStatusMap) {
-            console.log('📊 MonitorChainFlow: Using ChainContext ruleStatusMap:', chainContext.ruleStatusMap);
+        if (chainContext?.rules && chainContext.rules.length > 0) {
+            console.log('📊 MonitorChainFlow: Using ChainContext rules array:', chainContext.rules);
+            console.log('📊 MonitorChainFlow: ChainContext ruleStatusMap:', chainContext.ruleStatusMap);
             
-            Object.entries(chainContext.ruleStatusMap).forEach(([ruleName, status]) => {
-                switch (status) {
+            // Use the rules array from BRE endpoint DTO
+            chainContext.rules.forEach((rule: any) => {
+                console.log(`📊 MonitorChainFlow: Processing rule ${rule.identifier} with status: "${rule.status}"`);
+                switch (rule.status) {
                     case 'Success':
-                        nodeStatuses[ruleName] = 'success';
+                        nodeStatuses[rule.identifier] = 'success';
                         break;
                     case 'Failed':
                     case 'Error':
-                        nodeStatuses[ruleName] = 'failed';
+                        nodeStatuses[rule.identifier] = 'failed';
                         break;
                     case 'NotRun':
-                        nodeStatuses[ruleName] = 'pending';
+                        nodeStatuses[rule.identifier] = 'pending';
                         break;
                     default:
-                        nodeStatuses[ruleName] = 'pending';
+                        console.log(`📊 MonitorChainFlow: Unknown status "${rule.status}" for rule ${rule.identifier}, defaulting to pending`);
+                        nodeStatuses[rule.identifier] = 'pending';
                 }
             });
+            
+            console.log('📊 MonitorChainFlow: Final nodeStatuses:', nodeStatuses);
         } else {
             // Fallback to legacy execution history
             console.log('📊 MonitorChainFlow: Using legacy execution history');
@@ -539,16 +546,17 @@ function MonitorChainFlowInner({
                     targetHandle: undefined,
                     type: 'default', // Bezier curves instead of smoothstep
                     animated: isActivePath, // Animate executed paths
+                    data: { success: edge.type === 'success' }, // Add data attribute for CSS targeting
                     style: {
-                        stroke: (edge.type === 'success' ? '#22c55e' : edge.type === 'failure' ? '#ef4444' : '#22c55e'), // Brighter green to match node handle color
+                        stroke: (edge.type === 'success' ? '#00D437' : edge.type === 'failure' ? '#ef4444' : '#00D437'), // Bright green #00D437 to match progress bar
                         strokeWidth: 4, // More reasonable stroke width
                         opacity: 1, // Always visible for testing
-                        strokeDasharray: undefined, // NO dashed lines
+                        strokeDasharray: isActivePath ? '8,4' : undefined, // Add dashed lines for executed paths
                         filter: undefined // NO haze/glow effect
                     },
                     markerEnd: {
                         type: MarkerType.ArrowClosed,
-                        color: (edge.type === 'success' ? '#22c55e' : edge.type === 'failure' ? '#ef4444' : '#22c55e'), // Brighter green to match node handle color
+                        color: (edge.type === 'success' ? '#00D437' : edge.type === 'failure' ? '#ef4444' : '#00D437'), // Bright green #00D437 to match progress bar
                         width: 8, // More proportional arrow size
                         height: 8,
                     },
@@ -593,17 +601,18 @@ function MonitorChainFlowInner({
                         sourceHandle: prevResult.isSuccess ? 'success' : 'failure',
                         type: 'default', // Bezier curves
                         animated: true, // Animate executed paths
+                        data: { success: prevResult.isSuccess }, // Add data attribute for CSS targeting
                         style: {
-                            stroke: prevResult.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors: pure green and red
-                            strokeWidth: 25, // EXTREMELY bold stroke
-                            strokeDasharray: '12,6', // EXTREMELY bold dashed pattern
-                            filter: 'drop-shadow(0 0 20px currentColor) brightness(2) saturate(2)', // EXTREME glow effect
+                            stroke: prevResult.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                            strokeWidth: 4, // Match width from chainData
+                            strokeDasharray: '8,4', // Consistent dash pattern
+                            filter: undefined // Remove glow
                         },
                         markerEnd: {
                             type: MarkerType.ArrowClosed,
-                            color: prevResult.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors
-                            width: 30, // EXTREMELY large arrows
-                            height: 30,
+                            color: prevResult.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                            width: 8, // Consistent arrow size
+                            height: 8,
                         },
                     });
                 }
@@ -644,17 +653,18 @@ function MonitorChainFlowInner({
                             sourceHandle: result.isSuccess ? 'success' : 'failure',
                             type: 'default', // Bezier curves
                             animated: true, // Animate executed paths
+                            data: { success: result.isSuccess }, // Add data attribute for CSS targeting
                             style: {
-                                stroke: result.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors: pure green and red
-                                strokeWidth: 20, // EXTREMELY bold stroke
-                                strokeDasharray: '10,5', // EXTREMELY bold dashed pattern
-                                filter: 'drop-shadow(0 0 15px currentColor) brightness(2) saturate(2)', // EXTREME glow effect
+                                stroke: result.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                                strokeWidth: 4, // Match width from chainData
+                                strokeDasharray: '8,4', // Consistent dash pattern
+                                filter: undefined // Remove glow
                             },
                             markerEnd: {
                                 type: MarkerType.ArrowClosed,
-                                color: result.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors
-                                width: 35, // EXTREMELY large arrows
-                                height: 35,
+                                color: result.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                                width: 8, // Consistent arrow size
+                                height: 8,
                             },
                         });
                         
@@ -697,17 +707,18 @@ function MonitorChainFlowInner({
                         sourceHandle: lastResult.isSuccess ? 'success' : 'failure',
                         type: 'default', // Bezier curves
                         animated: true,
+                        data: { success: lastResult.isSuccess }, // Add data attribute for CSS targeting
                         style: {
-                            stroke: lastResult.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors: pure green and red
-                            strokeWidth: 25, // EXTREMELY bold stroke
-                            strokeDasharray: '12,6', // EXTREMELY bold dashed pattern
-                            filter: 'drop-shadow(0 0 20px currentColor) brightness(2) saturate(2)', // EXTREME glow effect
+                            stroke: lastResult.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                            strokeWidth: 4, // Match width from chainData
+                            strokeDasharray: '8,4', // Consistent dash pattern
+                            filter: undefined // Remove glow
                         },
                         markerEnd: {
                             type: MarkerType.ArrowClosed,
-                            color: lastResult.isSuccess ? '#00ff00' : '#ff0000', // EXTREMELY bright colors
-                            width: 30, // EXTREMELY large arrows
-                            height: 30,
+                            color: lastResult.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                            width: 8, // Consistent arrow size
+                            height: 8,
                         },
                     });
                 }
@@ -795,7 +806,7 @@ function MonitorChainFlowInner({
                                     <span className="text-xs text-slate-600 dark:text-slate-400">NotRun</span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <CheckCircle className="w-4 h-4 text-green-500" weight="fill" />
+                                    <CheckCircle className="w-4 h-4" weight="fill" style={{ color: '#00D437' }} />
                                     <span className="text-xs text-slate-600 dark:text-slate-400">Success</span>
                                 </div>
                                 <div className="flex items-center gap-2">

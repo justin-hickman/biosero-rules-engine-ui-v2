@@ -401,3 +401,12 @@ body {
   filter: drop-shadow(0 0 4px currentColor);
 }
 
+/* Force bright green colors for success edges */
+.react-flow__edge[data-success="true"] .react-flow__edge-path {
+  stroke: #00D437 !important;
+}
+
+.react-flow__edge[data-success="true"] .react-flow__edge-arrow {
+  fill: #00D437 !important;
+}
+

@@ -164,7 +164,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     let strokeDasharray = undefined;
                     
                     if (edge.type === 'success') {
-                        edgeColor = '#10b981'; // Green for success paths
+                        edgeColor = '#00D437'; // Bright green for success paths
                         animated = sourceStatus === 'Success'; // Animate only from completed rules
                     } else if (edge.type === 'failure') {
                         edgeColor = '#ef4444'; // Red for failure paths
@@ -173,7 +173,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     } else {
                         // Connection type - use source status color
                         if (sourceStatus === 'Success') {
-                            edgeColor = '#10b981'; // Green
+                            edgeColor = '#00D437'; // Bright green
                             animated = true;
                         } else if (sourceStatus === 'Failed') {
                             edgeColor = '#ef4444'; // Red
@@ -215,7 +215,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     
                     // Connect action to its rule
                     const sourceStatus = chainContext.ruleStatusMap?.[action.ruleName] || 'NotRun';
-                    let edgeColor = '#10b981'; // Actions are typically on success path
+                    let edgeColor = '#00D437'; // Actions are typically on success path
                     let strokeWidth = 3;
                     let animated = sourceStatus === 'Success';
                     let strokeDasharray = undefined;
@@ -463,7 +463,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     
                     if (isExecutedPath) {
                         // Executed path - use vibrant colors
-                        edgeColor = edge.type === 'success' ? '#10b981' : '#ef4444';
+                        edgeColor = edge.type === 'success' ? '#00D437' : '#ef4444';
                         strokeWidth = 3;
                     }
                     
@@ -1046,7 +1046,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                                                     <span className="text-sm">Running</span>
                                                                 </div>
                                                             ) : (
-                                                                <div className="flex items-center gap-1 text-green-600">
+                                                                <div className="flex items-center gap-1" style={{ color: '#00D437' }}>
                                                                     <CheckCircle className="w-4 h-4" />
                                                                     <span className="text-sm">Completed</span>
                                                                 </div>

@@ -210,7 +210,7 @@ const RuleNode: React.FC<NodeProps> = ({ data, isConnectable, selected, id }) =>
                 )}
                 
                 {isInitiating && (
-                    <div className="text-xs text-green-600 dark:text-green-400 mt-1 font-medium">
+                    <div className="text-xs mt-1 font-medium" style={{ color: '#00D437' }}>
                         Starting Rule
                     </div>
                 )}
@@ -229,10 +229,11 @@ const RuleNode: React.FC<NodeProps> = ({ data, isConnectable, selected, id }) =>
                         type="source"
                         position={Position.Right}
                         id="success"
-                        className="!bg-green-500 !w-3 !h-3 !border-2 !border-white !top-[35%]"
+                        className="!w-3 !h-3 !border-2 !border-white !top-[35%]"
+                        style={{ backgroundColor: '#00D437' }}
                         isConnectable={isConnectable}
                     />
-                    <div className="absolute right-[-35px] top-[30%] text-[10px] text-green-600 font-medium">
+                    <div className="absolute right-[-35px] top-[30%] text-[10px] font-medium" style={{ color: '#00D437' }}>
                         ✓
                     </div>
                     
@@ -370,7 +371,7 @@ const CustomEdge: React.FC<EdgeProps> = ({
                 path={edgePath}
                 markerEnd={markerEnd}
                 style={{
-                    stroke: isSuccess ? '#22c55e' : isFailure ? '#ef4444' : '#94a3b8',
+                    stroke: isSuccess ? '#00D437' : isFailure ? '#ef4444' : '#94a3b8',
                     strokeWidth: selected ? 3 : 2,
                     strokeDasharray: isFailure ? '5,5' : 'none'
                 }}
@@ -893,7 +894,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 type: MarkerType.ArrowClosed,
                 width: 20,
                 height: 20,
-                color: edge.type === 'success' ? '#22c55e' : edge.type === 'failure' ? '#ef4444' : '#94a3b8'
+                color: edge.type === 'success' ? '#00D437' : edge.type === 'failure' ? '#ef4444' : '#94a3b8'
             }
         })) || [];
         
@@ -917,7 +918,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 type: MarkerType.ArrowClosed,
                 width: 20,
                 height: 20,
-                color: connection.sourceHandle === 'success' ? '#22c55e' : 
+                color: connection.sourceHandle === 'success' ? '#00D437' : 
                        connection.sourceHandle === 'failure' ? '#ef4444' : '#94a3b8'
             }
         };

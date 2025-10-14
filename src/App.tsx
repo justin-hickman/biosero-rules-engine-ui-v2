@@ -1567,7 +1567,7 @@ const CustomEdge = ({
     
     // EXACT Tailwind CSS color values - must match handle colors
     const colorMap = {
-        'success': { color: '#22c55e', marker: 'arrow-green' },  // green-500
+        'success': { color: '#00D437', marker: 'arrow-green' },  // Bright green #00D437
         'failure': { color: '#ef4444', marker: 'arrow-red' },     // red-500
         'default': { color: '#94a3b8', marker: 'arrow-gray' }     // slate-400
     };

@@ -415,7 +415,10 @@ export class RulesEngineService {
                     chainId: data.items[0].chainId,
                     status: data.items[0].status,
                     isActive: data.items[0].isActive,
-                    variables: data.items[0].variables
+                    variables: data.items[0].variables,
+                    rulesCount: data.items[0].rules?.length || 0,
+                    rules: data.items[0].rules,
+                    ruleStatusMap: data.items[0].ruleStatusMap
                 } : null
             });
 
