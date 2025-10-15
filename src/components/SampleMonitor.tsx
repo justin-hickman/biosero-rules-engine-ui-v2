@@ -775,7 +775,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 clearInterval(pollingInterval);
             }
         };
-    }, [selectedContext, chainExecution?.isActive, chainExecution?.isComplete, currentAutoRefresh, fetchChainExecution]);
+    }, [selectedContext, chainExecution?.isActive, chainExecution?.isComplete, currentAutoRefresh]);
 
     return (
         <div className="fixed inset-0 top-14 bg-background">

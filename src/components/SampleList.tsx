@@ -37,6 +37,7 @@ export const SampleList = React.memo(function SampleList({
 }: SampleListProps) {
     
     const [samples, setSamples] = useState<WorkflowContext[]>([]);
+    
     const [isLoading, setIsLoading] = useState(false);
     const [isInitialLoad, setIsInitialLoad] = useState(true);
     const [isUpdating, setIsUpdating] = useState(false);
@@ -110,7 +111,10 @@ export const SampleList = React.memo(function SampleList({
                 // Completely silent update during auto-refresh - no state changes
                 // Don't set any loading states to prevent flashing
             }
-            setError(null);
+            // Don't reset error during auto-refresh to prevent re-renders
+            if (isInitialLoad) {
+                setError(null);
+            }
             
             // Use the new rich payload structure from /contexts/rulechains
             let apiParams: any = {
@@ -238,7 +242,6 @@ export const SampleList = React.memo(function SampleList({
                     lastSamplesRef.current = updatedSamples;
                     setSamples(updatedSamples);
                 } else {
-                    console.log('⏸️ Monitor: Sample data identical, skipping update');
                 }
             } else {
                 setSamples([]);
@@ -302,48 +305,17 @@ export const SampleList = React.memo(function SampleList({
         const filtered = samples.filter(sample => {
             // Grouping type filter - filter to only show items with the selected field populated
             if (groupingTypeRef.current === 'order' && !sample.orderId) {
-                console.log('🔍 Filtering out sample (no orderId):', { 
-                    sampleId: sample.sampleId, 
-                    orderId: sample.orderId, 
-                    batchId: sample.batchId,
-                    hasOrderId: !!sample.orderId,
-                    orderIdType: typeof sample.orderId
-                });
                 return false;
             }
             if (groupingTypeRef.current === 'batch' && !sample.batchId) {
-                console.log('🔍 Filtering out sample (no batchId):', { 
-                    sampleId: sample.sampleId, 
-                    orderId: sample.orderId, 
-                    batchId: sample.batchId,
-                    hasBatchId: !!sample.batchId,
-                    batchIdType: typeof sample.batchId
-                });
                 return false;
             }
             if (groupingTypeRef.current === 'sample' && !sample.sampleId) {
-                console.log('🔍 Filtering out sample (no sampleId):', { 
-                    sampleId: sample.sampleId, 
-                    orderId: sample.orderId, 
-                    batchId: sample.batchId,
-                    hasSampleId: !!sample.sampleId,
-                    sampleIdType: typeof sample.sampleId
-                });
                 return false;
             }
 
             // Status filter
         if (filterStatusRef.current !== 'all') {
-                console.log('🔍 SampleList: Filtering sample:', {
-                    sampleId: sample.sampleId,
-                    status: sample.status,
-                    statusName: ContextStatus[sample.status],
-                    filterStatus: filterStatusRef.current,
-                    shouldInclude: filterStatusRef.current === 'active' ? (sample.status === ContextStatus.Active || sample.status === ContextStatus.Running) :
-                                 filterStatusRef.current === 'complete' ? (sample.status === ContextStatus.Complete) :
-                                 filterStatusRef.current === 'failed' ? (sample.status === ContextStatus.Failed) : true
-                });
-                
                 if (filterStatusRef.current === 'active' && sample.status !== ContextStatus.Active && sample.status !== ContextStatus.Running) {
                     return false;
                 }
@@ -407,18 +379,7 @@ export const SampleList = React.memo(function SampleList({
             };
         }
 
-        // Only log when there are actual changes
-        if (filtered.length > 0) {
-            console.log('📊 Monitor: Grouped samples:', {
-                total: samples.length,
-                filtered: filtered.length,
-                groupingType: groupingTypeRef.current,
-                groups: Object.keys(grouped).reduce((acc, key) => {
-                    acc[key] = grouped[key].length;
-                    return acc;
-                }, {} as Record<string, number>)
-            });
-        }
+        // Removed console.log to prevent re-renders during auto-refresh
 
         return grouped;
     }, [samples]);
