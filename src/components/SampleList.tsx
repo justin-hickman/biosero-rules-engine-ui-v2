@@ -44,6 +44,7 @@ export const SampleList = React.memo(function SampleList({
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'complete' | 'failed'>('all');
     const [dateFilter, setDateFilter] = useState<number | null>(null);
+    const [groupingType, setGroupingType] = useState<'order' | 'batch' | 'sample'>('sample');
     const [isAutoRefresh, setIsAutoRefresh] = useState(externalAutoRefresh);
     
     // Sync with external auto refresh state
@@ -63,6 +64,7 @@ export const SampleList = React.memo(function SampleList({
     const filterStatusRef = useRef(filterStatus);
     const dateFilterRef = useRef(dateFilter);
     const searchTermRef = useRef(searchTerm);
+    const groupingTypeRef = useRef(groupingType);
     
     // State to trigger re-filtering when filters change
     const [filterTrigger, setFilterTrigger] = useState(0);
@@ -83,6 +85,11 @@ export const SampleList = React.memo(function SampleList({
         searchTermRef.current = searchTerm;
         setFilterTrigger(prev => prev + 1);
     }, [searchTerm]);
+
+    useEffect(() => {
+        groupingTypeRef.current = groupingType;
+        setFilterTrigger(prev => prev + 1);
+    }, [groupingType]);
 
     const rulesEngineService = React.useMemo(
         () => new RulesEngineService(rulesEngineUrl),
@@ -267,6 +274,17 @@ export const SampleList = React.memo(function SampleList({
         const filterKey = `${filterStatusRef.current}-${searchTermRef.current}-${samples.length}`;
 
         const filtered = samples.filter(sample => {
+            // Grouping type filter - filter to only show items with the selected field populated
+            if (groupingTypeRef.current === 'order' && !sample.orderId) {
+                return false;
+            }
+            if (groupingTypeRef.current === 'batch' && !sample.batchId) {
+                return false;
+            }
+            if (groupingTypeRef.current === 'sample' && !sample.sampleId) {
+                return false;
+            }
+
             // Status filter
         if (filterStatusRef.current !== 'all') {
                 console.log('🔍 SampleList: Filtering sample:', {
@@ -290,24 +308,57 @@ export const SampleList = React.memo(function SampleList({
                 }
             }
 
-            // Search filter
+            // Search filter - context-aware based on grouping type
         if (searchTermRef.current) {
             const searchLower = searchTermRef.current.toLowerCase();
+            
+            // Search based on selected grouping type
+            if (groupingTypeRef.current === 'order') {
+                // When grouping by orders, search primarily by orderId
+                return sample.orderId?.toLowerCase().includes(searchLower) || false;
+            } else if (groupingTypeRef.current === 'batch') {
+                // When grouping by batches, search primarily by batchId
+                return sample.batchId?.toLowerCase().includes(searchLower) || false;
+            } else {
+                // When grouping by samples, search across all sample-related fields
                 return (
-                sample.sampleId?.toLowerCase().includes(searchLower) ||
+                    sample.sampleId?.toLowerCase().includes(searchLower) ||
                     sample.workflowContextId?.toLowerCase().includes(searchLower) ||
-                    sample.chainId?.toLowerCase().includes(searchLower)
+                    sample.chainId?.toLowerCase().includes(searchLower) ||
+                    sample.orderId?.toLowerCase().includes(searchLower) ||
+                    sample.batchId?.toLowerCase().includes(searchLower)
                 );
             }
+        }
 
             return true;
         });
 
-        const result = {
-            active: filtered.filter(s => s.status === ContextStatus.Active || s.status === ContextStatus.Running),
-            complete: filtered.filter(s => s.status === ContextStatus.Complete),
-            failed: filtered.filter(s => s.status === ContextStatus.Failed)
-        };
+        // Group by the selected type
+        let grouped: Record<string, WorkflowContext[]> = {};
+        
+        if (groupingTypeRef.current === 'order') {
+            // Group by orderId
+            filtered.forEach(sample => {
+                const key = sample.orderId || 'unknown';
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push(sample);
+            });
+        } else if (groupingTypeRef.current === 'batch') {
+            // Group by batchId
+            filtered.forEach(sample => {
+                const key = sample.batchId || 'unknown';
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push(sample);
+            });
+        } else {
+            // Group by status (default 'sample' behavior)
+            grouped = {
+                active: filtered.filter(s => s.status === ContextStatus.Active || s.status === ContextStatus.Running),
+                complete: filtered.filter(s => s.status === ContextStatus.Complete),
+                failed: filtered.filter(s => s.status === ContextStatus.Failed)
+            };
+        }
 
         // Only log when there are actual changes
         if (filtered.length > 0) {
@@ -315,15 +366,15 @@ export const SampleList = React.memo(function SampleList({
                 filterKey,
                 total: samples.length,
                 filtered: filtered.length,
-                groups: {
-                    active: result.active.length,
-                    complete: result.complete.length,
-                    failed: result.failed.length
-                }
+                groupingType: groupingTypeRef.current,
+                groups: Object.keys(grouped).reduce((acc, key) => {
+                    acc[key] = grouped[key].length;
+                    return acc;
+                }, {} as Record<string, number>)
             });
         }
 
-        return result;
+        return grouped;
     }, [samples, filterTrigger]);
 
     // Toggle group expansion
@@ -388,7 +439,13 @@ export const SampleList = React.memo(function SampleList({
         );
     }, [selectedSampleId, onSampleSelect, rulesEngineService]);
 
-    const totalCount = groupedSamples.active.length + groupedSamples.complete.length + groupedSamples.failed.length;
+    const totalCount = useMemo(() => {
+        if (groupingType === 'sample') {
+            return groupedSamples.active?.length + groupedSamples.complete?.length + groupedSamples.failed?.length || 0;
+        } else {
+            return Object.values(groupedSamples).reduce((sum, group) => sum + (Array.isArray(group) ? group.length : 0), 0);
+        }
+    }, [groupedSamples, groupingType]);
 
     return (
         <div className="flex flex-col h-full bg-background">
@@ -431,7 +488,11 @@ export const SampleList = React.memo(function SampleList({
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
                     <Input
-                        placeholder="Search samples..."
+                        placeholder={
+                            groupingType === 'order' ? "Search orders..." :
+                            groupingType === 'batch' ? "Search batches..." :
+                            "Search samples..."
+                        }
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="pl-9 h-9"
@@ -440,6 +501,33 @@ export const SampleList = React.memo(function SampleList({
 
                 {/* Filters */}
                 <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1">
+                        <Button
+                            variant={groupingType === 'sample' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setGroupingType('sample')}
+                            className="text-xs"
+                        >
+                            Samples
+                        </Button>
+                        <Button
+                            variant={groupingType === 'order' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setGroupingType('order')}
+                            className="text-xs"
+                        >
+                            Orders
+                        </Button>
+                        <Button
+                            variant={groupingType === 'batch' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setGroupingType('batch')}
+                            className="text-xs"
+                        >
+                            Batches
+                        </Button>
+                    </div>
+                    
                     <div className="flex items-center gap-1">
                         <Button
                             variant={filterStatus === 'all' ? 'default' : 'outline'}
@@ -518,85 +606,41 @@ export const SampleList = React.memo(function SampleList({
             {!isLoading && !error && totalCount > 0 && (
                 <ScrollArea className="flex-1">
                     <div className="pl-8 pr-6 py-4 space-y-4">
-                        {/* Active/Running Group */}
-                        {groupedSamples.active.length > 0 && (
-                            <div>
-                                <div
-                                    className="flex items-center gap-2 mb-2 cursor-pointer select-none"
-                                    onClick={() => toggleGroup('active')}
-                                >
-                                    {expandedGroups.has('active') ? (
-                                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                                    ) : (
-                                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                                    )}
-                                    <h3 className="font-medium text-sm">
-                                        Active & Running
-                                    </h3>
-                                    <Badge variant="default" className="text-xs">
-                                        {groupedSamples.active.length}
-                                    </Badge>
-                                </div>
-                                {expandedGroups.has('active') && (
-                                    <div className="space-y-2">
-                                        {groupedSamples.active.map(renderSampleCard)}
-                                    </div>
-                                )}
+                        {/* When a specific status filter is selected, show flat list */}
+                        {filterStatus !== 'all' ? (
+                            <div className="space-y-2">
+                                {Object.values(groupedSamples).flat().map(renderSampleCard)}
                             </div>
-                        )}
-
-                        {/* Complete Group */}
-                        {groupedSamples.complete.length > 0 && (
-                            <div>
-                                <div
-                                    className="flex items-center gap-2 mb-2 cursor-pointer select-none"
-                                    onClick={() => toggleGroup('complete')}
-                                >
-                                    {expandedGroups.has('complete') ? (
-                                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                                    ) : (
-                                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                                    )}
-                                    <h3 className="font-medium text-sm">
-                                        Complete
-                                    </h3>
-                                    <Badge variant="secondary" className="text-xs">
-                                        {groupedSamples.complete.length}
-                                    </Badge>
-                                </div>
-                                {expandedGroups.has('complete') && (
-                                    <div className="space-y-2">
-                                        {groupedSamples.complete.map(renderSampleCard)}
+                        ) : (
+                            /* When "All" is selected, show grouped view */
+                            Object.entries(groupedSamples).map(([groupKey, groupSamples]) => (
+                                <div key={groupKey}>
+                                    <div
+                                        className="flex items-center gap-2 mb-2 cursor-pointer select-none"
+                                        onClick={() => toggleGroup(groupKey)}
+                                    >
+                                        {expandedGroups.has(groupKey) ? (
+                                            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                                        ) : (
+                                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                                        )}
+                                        <h3 className="font-medium text-sm">
+                                            {groupingType === 'sample' 
+                                                ? (groupKey === 'active' ? 'Active & Running' : 
+                                                   groupKey === 'complete' ? 'Complete' : 'Failed')
+                                                : groupKey}
+                                        </h3>
+                                        <Badge variant="default" className="text-xs">
+                                            {Array.isArray(groupSamples) ? groupSamples.length : 0}
+                                        </Badge>
                                     </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Failed Group */}
-                        {groupedSamples.failed.length > 0 && (
-                            <div>
-                                <div
-                                    className="flex items-center gap-2 mb-2 cursor-pointer select-none"
-                                    onClick={() => toggleGroup('failed')}
-                                >
-                                    {expandedGroups.has('failed') ? (
-                                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                                    ) : (
-                                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                                    {expandedGroups.has(groupKey) && (
+                                        <div className="ml-6 space-y-2">
+                                            {Array.isArray(groupSamples) && groupSamples.map(renderSampleCard)}
+                                        </div>
                                     )}
-                                    <h3 className="font-medium text-sm">
-                                        Failed
-                                    </h3>
-                                    <Badge variant="destructive" className="text-xs">
-                                        {groupedSamples.failed.length}
-                                    </Badge>
                                 </div>
-                                {expandedGroups.has('failed') && (
-                                    <div className="space-y-2">
-                                        {groupedSamples.failed.map(renderSampleCard)}
-                                    </div>
-                                )}
-                            </div>
+                            ))
                         )}
                     </div>
                 </ScrollArea>
