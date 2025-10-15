@@ -165,7 +165,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     let strokeDasharray = undefined;
                     
                     if (edge.type === 'success') {
-                        edgeColor = '#00D437'; // Bright green for success paths
+                        edgeColor = '#00FF41'; // Bright neon green for success paths
                         animated = sourceStatus === 'Success'; // Animate only from completed rules
                     } else if (edge.type === 'failure') {
                         edgeColor = '#ef4444'; // Red for failure paths
@@ -174,7 +174,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     } else {
                         // Connection type - use source status color
                         if (sourceStatus === 'Success') {
-                            edgeColor = '#00D437'; // Bright green
+                            edgeColor = '#00FF41'; // Bright neon green
                             animated = true;
                         } else if (sourceStatus === 'Failed') {
                             edgeColor = '#ef4444'; // Red
@@ -216,7 +216,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     
                     // Connect action to its rule
                     const sourceStatus = chainContext.ruleStatusMap?.[action.ruleName] || 'NotRun';
-                    let edgeColor = '#00D437'; // Actions are typically on success path
+                    let edgeColor = '#00FF41'; // Actions are typically on success path
                     let strokeWidth = 3;
                     let animated = sourceStatus === 'Success';
                     let strokeDasharray = undefined;
@@ -327,7 +327,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     
                     if (isExecutedPath) {
                         // Executed path - use vibrant colors
-                        edgeColor = edge.type === 'success' ? '#00D437' : '#ef4444';
+                        edgeColor = edge.type === 'success' ? '#00FF41' : '#ef4444';
                         strokeWidth = 3;
                     }
                     

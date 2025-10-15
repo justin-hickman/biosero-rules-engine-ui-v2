@@ -105,7 +105,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
     const getStatusIcon = () => {
         switch (data.status) {
             case 'success':
-                return <CheckCircle className="w-4 h-4" weight="fill" style={{ color: '#00D437' }} />;
+                return <CheckCircle className="w-4 h-4" weight="fill" style={{ color: '#00FF41' }} />;
             case 'failed':
                 return <XCircle className="w-4 h-4 text-red-500" weight="fill" />;
             case 'pending': // NotRun state
@@ -116,21 +116,21 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
     };
 
     const getNodeStyle = () => {
-        let baseClasses = "bg-slate-800 border-2 rounded-lg shadow-lg transition-all duration-200 min-w-[250px]";
+        let baseClasses = "bg-slate-800 rounded-lg shadow-lg transition-all duration-200 min-w-[250px]";
         
         // Base border color
-        let borderColor = isRule ? "border-blue-500" : "border-slate-600";
+        let borderColor = isRule ? "border-2 border-blue-500" : "border-2 border-slate-600";
         
         // Override border color based on status
         switch (data.status) {
             case 'success':
-                borderColor = "border-[#00D437]";
+                borderColor = "border-2 border-emerald-500";
                 break;
             case 'failed':
-                borderColor = "border-red-500";
+                borderColor = "border-2 border-red-500";
                 break;
             case 'pending': // NotRun state
-                borderColor = "border-gray-500";
+                borderColor = "border-2 border-gray-500";
                 break;
         }
         
@@ -154,7 +154,7 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
     };
 
     return (
-        <div className={getNodeStyle()}>
+        <div className={getNodeStyle()} data-status={data.status}>
             <Handle
                 type="target"
                 position={Position.Left}
@@ -218,9 +218,9 @@ const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
                         position={Position.Right}
                         id="success"
                         className="!w-3 !h-3 !border-2 !border-slate-800 !top-[35%]"
-                        style={{ backgroundColor: '#00D437' }}
+                        style={{ backgroundColor: '#00FF41' }}
                     />
-                    <div className="absolute right-[-35px] top-[30%] text-[10px] font-medium" style={{ color: '#00D437' }}>
+                    <div className="absolute right-[-35px] top-[30%] text-[10px] font-medium" style={{ color: '#00FF41' }}>
                         ✓
                     </div>
                     
@@ -521,7 +521,7 @@ function MonitorChainFlowInner({
                     id: nodeId,
                     type: 'monitor',
                     position: node.position || { x: 0, y: 0 },
-                    data: nodeData,
+                    data: { ...nodeData, status: nodeData.status }
                 });
             });
 
@@ -535,6 +535,14 @@ function MonitorChainFlowInner({
                 const isActivePath = isExecuted && (
                     (edge.type === 'success' && sourceStatus === 'success') ||
                     (edge.type === 'failure' && sourceStatus === 'failed')
+                );
+                
+                // Animate edges that are actively being processed or completed on active path
+                const shouldAnimate = isActivePath || (
+                    isExecuted && targetStatus === 'pending' && (
+                        (edge.type === 'success' && sourceStatus === 'success') ||
+                        (edge.type === 'failure' && sourceStatus === 'failed')
+                    )
                 );
 
                 // For action nodes, inherit status from their source rule if executed
@@ -561,10 +569,10 @@ function MonitorChainFlowInner({
                     sourceHandle: edge.type,
                     targetHandle: undefined,
                     type: 'default', // Bezier curves instead of smoothstep
-                    animated: isActivePath, // Animate executed paths
+                    animated: shouldAnimate, // Animate executed paths and active processing
                     data: { success: edge.type === 'success' }, // Add data attribute for CSS targeting
                     style: {
-                        stroke: (edge.type === 'success' ? '#00D437' : edge.type === 'failure' ? '#ef4444' : '#00D437'), // Bright green #00D437 to match progress bar
+                        stroke: (edge.type === 'success' ? '#00FF41' : edge.type === 'failure' ? '#ef4444' : '#00FF41'), // Bright neon green #00FF41
                         strokeWidth: 4, // More reasonable stroke width
                         opacity: 1, // Always visible for testing
                         strokeDasharray: isActivePath ? '8,4' : undefined, // Add dashed lines for executed paths
@@ -572,7 +580,7 @@ function MonitorChainFlowInner({
                     },
                     markerEnd: {
                         type: MarkerType.ArrowClosed,
-                        color: (edge.type === 'success' ? '#00D437' : edge.type === 'failure' ? '#ef4444' : '#00D437'), // Bright green #00D437 to match progress bar
+                        color: (edge.type === 'success' ? '#00FF41' : edge.type === 'failure' ? '#ef4444' : '#00FF41'), // Bright neon green #00FF41
                         width: 8, // More proportional arrow size
                         height: 8,
                     },
@@ -634,14 +642,14 @@ function MonitorChainFlowInner({
                         animated: true, // Animate executed paths
                         data: { success: prevResult.isSuccess }, // Add data attribute for CSS targeting
                         style: {
-                            stroke: prevResult.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                            stroke: prevResult.isSuccess ? '#00FF41' : '#ef4444', // Bright neon green #00FF41
                             strokeWidth: 4, // Match width from chainData
                             strokeDasharray: '8,4', // Consistent dash pattern
                             filter: undefined // Remove glow
                         },
                         markerEnd: {
                             type: MarkerType.ArrowClosed,
-                            color: prevResult.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                            color: prevResult.isSuccess ? '#00FF41' : '#ef4444', // Bright neon green #00FF41
                             width: 8, // Consistent arrow size
                             height: 8,
                         },
@@ -755,14 +763,14 @@ function MonitorChainFlowInner({
                         animated: true,
                         data: { success: lastResult.isSuccess }, // Add data attribute for CSS targeting
                         style: {
-                            stroke: lastResult.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                            stroke: lastResult.isSuccess ? '#00FF41' : '#ef4444', // Bright neon green #00FF41
                             strokeWidth: 4, // Match width from chainData
                             strokeDasharray: '8,4', // Consistent dash pattern
                             filter: undefined // Remove glow
                         },
                         markerEnd: {
                             type: MarkerType.ArrowClosed,
-                            color: lastResult.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                            color: lastResult.isSuccess ? '#00FF41' : '#ef4444', // Bright neon green #00FF41
                             width: 8, // Consistent arrow size
                             height: 8,
                         },
@@ -785,7 +793,7 @@ function MonitorChainFlowInner({
         }
 
         return { nodes: newNodes, edges: newEdges };
-    }, [chainData, executionHistory, currentRuleName]);
+    }, [chainData, executionHistory, currentRuleName, chainContext]);
 
     const handleNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
         if (onNodeClick) {
@@ -852,7 +860,7 @@ function MonitorChainFlowInner({
                                     <span className="text-xs text-slate-600 dark:text-slate-400">NotRun</span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <CheckCircle className="w-4 h-4" weight="fill" style={{ color: '#00D437' }} />
+                                    <CheckCircle className="w-4 h-4" weight="fill" style={{ color: '#00FF41' }} />
                                     <span className="text-xs text-slate-600 dark:text-slate-400">Success</span>
                                 </div>
                                 <div className="flex items-center gap-2">

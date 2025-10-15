@@ -66,29 +66,23 @@ export const SampleList = React.memo(function SampleList({
     const searchTermRef = useRef(searchTerm);
     const groupingTypeRef = useRef(groupingType);
     
-    // State to trigger re-filtering when filters change
-    const [filterTrigger, setFilterTrigger] = useState(0);
     const lastSamplesRef = useRef<WorkflowContext[]>([]);
     
-    // Update refs when values change and trigger re-filtering
+    // Update refs when values change
     useEffect(() => {
         filterStatusRef.current = filterStatus;
-        setFilterTrigger(prev => prev + 1);
     }, [filterStatus]);
     
     useEffect(() => {
         dateFilterRef.current = dateFilter;
-        setFilterTrigger(prev => prev + 1);
     }, [dateFilter]);
     
     useEffect(() => {
         searchTermRef.current = searchTerm;
-        setFilterTrigger(prev => prev + 1);
     }, [searchTerm]);
 
     useEffect(() => {
         groupingTypeRef.current = groupingType;
-        setFilterTrigger(prev => prev + 1);
     }, [groupingType]);
 
     const rulesEngineService = React.useMemo(
@@ -113,8 +107,8 @@ export const SampleList = React.memo(function SampleList({
             if (isInitialLoad) {
                 setIsLoading(true);
             } else {
-                // Show subtle updating indicator for streaming effect
-                setIsUpdating(true);
+                // Completely silent update during auto-refresh - no state changes
+                // Don't set any loading states to prevent flashing
             }
             setError(null);
             
@@ -218,18 +212,31 @@ export const SampleList = React.memo(function SampleList({
                     sampleIds: newSamples.map(s => s.sampleId)
                 });
                 
-                // Create a stable comparison key for each sample
-                const createSampleKey = (sample: WorkflowContext) => 
-                    `${sample.sampleId}-${sample.status}-${sample.lastUpdatedAt}-${sample.chainId || 'no-chain'}`;
-                
-                // Additional deep comparison to prevent flickering
-                const newSamplesString = JSON.stringify(newSamples.map(createSampleKey).sort());
-                const lastSamplesString = lastSamplesRef.current.length > 0 ? 
-                    JSON.stringify(lastSamplesRef.current.map(createSampleKey).sort()) : null;
-                
-                if (newSamplesString !== lastSamplesString) {
-                    lastSamplesRef.current = newSamples;
-                    setSamples(newSamples);
+                // Build map of old samples by ID for O(1) lookup
+                const oldSamplesMap = new Map(
+                    lastSamplesRef.current.map(s => [s.sampleId, s])
+                );
+
+                let hasChanges = false;
+                const updatedSamples = newSamples.map(newSample => {
+                    const oldSample = oldSamplesMap.get(newSample.sampleId);
+                    
+                    // Check if this specific sample changed
+                    if (!oldSample || 
+                        oldSample.status !== newSample.status || 
+                        oldSample.lastUpdatedAt !== newSample.lastUpdatedAt) {
+                        hasChanges = true;
+                        return newSample;
+                    }
+                    
+                    // Return old reference to prevent re-render
+                    return oldSample;
+                });
+
+                // Only update if something changed
+                if (hasChanges || updatedSamples.length !== lastSamplesRef.current.length) {
+                    lastSamplesRef.current = updatedSamples;
+                    setSamples(updatedSamples);
                 } else {
                     console.log('⏸️ Monitor: Sample data identical, skipping update');
                 }
@@ -257,17 +264,23 @@ export const SampleList = React.memo(function SampleList({
                 setError(`API Error: ${errorMessage}`);
             }
         } finally {
-            setIsLoading(false);
-            setIsUpdating(false);
-            setIsInitialLoad(false);
+            // Only reset states on initial load, not during auto-refresh
+            if (isInitialLoad) {
+                setIsLoading(false);
+                setIsInitialLoad(false);
+            }
+            // Don't reset isUpdating during auto-refresh to prevent flashing
             isFetching.current = false;
         }
     }, [rulesEngineService]);
 
     // Streaming-style auto-refresh with intelligent polling
     useEffect(() => {
-        // Always perform initial fetch when component mounts
-        fetchSamples();
+        // Only fetch on mount or when auto-refresh toggles
+        if (isInitialLoad) {
+            fetchSamples();
+            setIsInitialLoad(false);
+        }
 
         let interval: number | null = null;
         if (isAutoRefresh) {
@@ -282,13 +295,10 @@ export const SampleList = React.memo(function SampleList({
                 clearInterval(interval);
             }
         };
-    }, [isAutoRefresh, refreshInterval, fetchSamples]);
+    }, [isAutoRefresh, refreshInterval]); // Removed fetchSamples dependency
 
     // Group samples by status with proper filtering and stable references
     const groupedSamples = useMemo(() => {
-        // Create a stable key for the current filter state
-        const filterKey = `${filterStatusRef.current}-${searchTermRef.current}-${samples.length}`;
-
         const filtered = samples.filter(sample => {
             // Grouping type filter - filter to only show items with the selected field populated
             if (groupingTypeRef.current === 'order' && !sample.orderId) {
@@ -400,7 +410,6 @@ export const SampleList = React.memo(function SampleList({
         // Only log when there are actual changes
         if (filtered.length > 0) {
             console.log('📊 Monitor: Grouped samples:', {
-                filterKey,
                 total: samples.length,
                 filtered: filtered.length,
                 groupingType: groupingTypeRef.current,
@@ -412,7 +421,7 @@ export const SampleList = React.memo(function SampleList({
         }
 
         return grouped;
-    }, [samples, filterTrigger]);
+    }, [samples]);
 
     // Toggle group expansion
     const toggleGroup = useCallback((group: string) => {
@@ -461,12 +470,23 @@ export const SampleList = React.memo(function SampleList({
                         {statusIcon}
                         <div>
                             <div className="font-medium text-sm">{sample.sampleId}</div>
-                            <div className="text-xs text-muted-foreground">
-                                {sample.workflowContextId}
+                            {sample.orderId && (
+                                <div className="text-xs text-muted-foreground">Order: {sample.orderId}</div>
+                            )}
+                            {sample.batchId && (
+                                <div className="text-xs text-muted-foreground">Batch: {sample.batchId}</div>
+                            )}
                         </div>
                     </div>
-                                </div>
-                    <div className="text-right">
+                    <div className="flex items-center gap-2">
+                        <Badge variant={
+                            sample.status === ContextStatus.Complete ? "default" :
+                            sample.status === ContextStatus.Failed ? "destructive" :
+                            sample.status === ContextStatus.Active ? "secondary" :
+                            "outline"
+                        }>
+                            {ContextStatus[sample.status]}
+                        </Badge>
                         <div className="text-xs text-muted-foreground">
                             <span>{rulesEngineService.formatDuration(sample.createdAt, sample.lastUpdatedAt)}</span>
                         </div>
@@ -683,8 +703,8 @@ export const SampleList = React.memo(function SampleList({
                 </ScrollArea>
             )}
 
-            {/* Subtle updating indicator for streaming effect */}
-            {isUpdating && (
+            {/* Subtle updating indicator for streaming effect - only show on manual refresh */}
+            {isUpdating && !isAutoRefresh && (
                 <div className="absolute top-2 right-2 z-10">
                     <div className="bg-primary/10 text-primary px-2 py-1 rounded-full text-xs flex items-center gap-1">
                         <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>

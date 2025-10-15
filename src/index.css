@@ -403,10 +403,24 @@ body {
 
 /* Force bright green colors for success edges */
 .react-flow__edge[data-success="true"] .react-flow__edge-path {
-  stroke: #00D437 !important;
+  stroke: #00FF41 !important;
 }
 
 .react-flow__edge[data-success="true"] .react-flow__edge-arrow {
-  fill: #00D437 !important;
+  fill: #00FF41 !important;
+}
+
+/* Force bright neon green border for success nodes */
+.react-flow__node div[data-status="success"] {
+  border-color: #00FF41 !important;
+  border-width: 4px !important;
+  border-style: solid !important;
+}
+
+/* Even more specific selector to override any React Flow defaults */
+div[data-status="success"] {
+  border-color: #00FF41 !important;
+  border-width: 4px !important;
+  border-style: solid !important;
 }
 
