@@ -43,7 +43,26 @@ export const SampleList = React.memo(function SampleList({
     const [isUpdating, setIsUpdating] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+    const [isSearching, setIsSearching] = useState(false);
     const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'complete' | 'failed'>('all');
+    const [currentPage, setCurrentPage] = useState(1);
+    const samplesPerPage = 10;
+
+    // Debounce search term to prevent excessive filtering
+    useEffect(() => {
+        setIsSearching(true);
+        const timer = setTimeout(() => {
+            setDebouncedSearchTerm(searchTerm);
+            setIsSearching(false);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
+
+    // Reset to page 1 when search term or filter changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [debouncedSearchTerm, filterStatus]);
     const [dateFilter, setDateFilter] = useState<number | null>(null);
     const [groupingType, setGroupingType] = useState<'order' | 'batch' | 'sample'>('sample');
     const [isAutoRefresh, setIsAutoRefresh] = useState(externalAutoRefresh);
@@ -64,7 +83,7 @@ export const SampleList = React.memo(function SampleList({
     // Use refs for filter values to prevent fetchSamples from changing
     const filterStatusRef = useRef(filterStatus);
     const dateFilterRef = useRef(dateFilter);
-    const searchTermRef = useRef(searchTerm);
+    const searchTermRef = useRef(debouncedSearchTerm);
     const groupingTypeRef = useRef(groupingType);
     
     const lastSamplesRef = useRef<WorkflowContext[]>([]);
@@ -79,8 +98,8 @@ export const SampleList = React.memo(function SampleList({
     }, [dateFilter]);
     
     useEffect(() => {
-        searchTermRef.current = searchTerm;
-    }, [searchTerm]);
+        searchTermRef.current = debouncedSearchTerm;
+    }, [debouncedSearchTerm]);
 
     useEffect(() => {
         groupingTypeRef.current = groupingType;
@@ -96,7 +115,6 @@ export const SampleList = React.memo(function SampleList({
         // Prevent rapid successive calls
         const now = Date.now();
         if (isFetching.current || (now - lastFetchTime.current < 1000)) {
-            console.log('📊 Monitor: Skipping fetch - too soon or already fetching');
             return;
         }
         
@@ -113,14 +131,14 @@ export const SampleList = React.memo(function SampleList({
             }
             // Don't reset error during auto-refresh to prevent re-renders
             if (isInitialLoad) {
-                setError(null);
+            setError(null);
             }
             
             // Use the new rich payload structure from /contexts/rulechains
             let apiParams: any = {
                 page: 1,
-                pageSize: 50,
-                isActive: true
+                pageSize: 10000, // Increased to pull in all samples
+                // isActive: true - REMOVED to show both active and completed samples
             };
             
             if (dateFilterRef.current) {
@@ -131,35 +149,20 @@ export const SampleList = React.memo(function SampleList({
                 apiParams.endTimestamp = endDate.toISOString();
             }
             
-            console.log('📊 Monitor: Using new rich payload API call:', apiParams);
             
             // Get the rich payload structure
             let response = await rulesEngineService.getChainContexts(apiParams);
             
             // Fallback if no active chains
             if (!response.success || !response.items || response.items.length === 0) {
-                console.log('📊 Monitor: No active chains found, trying all chains...');
                 const fallbackParams = { ...apiParams };
                 delete fallbackParams.isActive;
                 response = await rulesEngineService.getChainContexts(fallbackParams);
-                console.log('📊 Monitor: Fallback query result:', {
-                    success: response.success,
-                    total: response.total,
-                    itemCount: response.items?.length || 0
-                });
             }
             
             if (response.success && response.items && response.items.length > 0) {
                 // Convert rich payload to samples
                 const newSamples = response.items.map(chain => {
-                    // Debug the chain structure
-                    console.log('📊 Monitor: Processing chain:', {
-                        chainId: chain.chainId,
-                        variables: chain.variables,
-                        status: chain.status,
-                        isActive: chain.isActive,
-                        isComplete: chain.isComplete
-                    });
                     
                     // Extract sample info from the rich payload
                     const chainId = chain.chainId || 'unknown';
@@ -175,15 +178,6 @@ export const SampleList = React.memo(function SampleList({
                     const orderId = chain.orderId || undefined;
                     const batchId = chain.batchId || undefined;
                     
-                    console.log('🔍 SampleList: Extracting fields:', {
-                        chainId: chainId,
-                        topLevelOrderId: chain.orderId,
-                        topLevelBatchId: chain.batchId,
-                        topLevelSampleId: chain.sampleId,
-                        extractedOrderId: orderId,
-                        extractedBatchId: batchId,
-                        extractedSampleId: sampleId
-                    });
                     
                     return {
                         contextId: chainId,
@@ -191,7 +185,7 @@ export const SampleList = React.memo(function SampleList({
                         batchId: batchId,
                         sampleId: sampleId,
                         status: status as ContextStatus,
-                        lastUpdatedAt: chain.startTimestamp,
+                        lastUpdatedAt: chain.endTimestamp || chain.startTimestamp,
                         createdAt: chain.startTimestamp, // Add required createdAt property
                         chainId: chainId,
                         // Add rich metadata
@@ -211,10 +205,6 @@ export const SampleList = React.memo(function SampleList({
                     };
                 });
                 
-                console.log('✅ Monitor: Converted rich payload to samples:', {
-                    count: newSamples.length,
-                    sampleIds: newSamples.map(s => s.sampleId)
-                });
                 
                 // Build map of old samples by ID for O(1) lookup
                 const oldSamplesMap = new Map(
@@ -241,19 +231,12 @@ export const SampleList = React.memo(function SampleList({
                 if (hasChanges || updatedSamples.length !== lastSamplesRef.current.length) {
                     lastSamplesRef.current = updatedSamples;
                     setSamples(updatedSamples);
-                } else {
                 }
             } else {
                 setSamples([]);
-                console.log('⚠️ Monitor: No samples found in database');
             }
             setError(null);
         } catch (err: any) {
-            console.error('❌ Monitor: Failed to fetch samples:', {
-                error: err.message,
-                rulesEngineUrl,
-                stack: err.stack
-            });
             
             const errorMessage = err.message || 'Failed to fetch samples';
             
@@ -269,8 +252,8 @@ export const SampleList = React.memo(function SampleList({
         } finally {
             // Only reset states on initial load, not during auto-refresh
             if (isInitialLoad) {
-                setIsLoading(false);
-                setIsInitialLoad(false);
+            setIsLoading(false);
+            setIsInitialLoad(false);
             }
             // Don't reset isUpdating during auto-refresh to prevent flashing
             isFetching.current = false;
@@ -281,16 +264,16 @@ export const SampleList = React.memo(function SampleList({
     useEffect(() => {
         // Only fetch on mount or when auto-refresh toggles
         if (isInitialLoad) {
-            fetchSamples();
+        fetchSamples();
             setIsInitialLoad(false);
         }
 
         let interval: number | null = null;
         if (isAutoRefresh) {
-            // Use longer intervals for streaming effect - no more flickering
+            // Poll sample list less frequently to prevent flickering
             interval = setInterval(() => {
                 fetchSamples();
-            }, refreshInterval * 1.5); // 1.5x the interval for responsive streaming
+            }, refreshInterval * 3); // Triple the interval to reduce flickering
         }
 
         return () => {
@@ -298,7 +281,7 @@ export const SampleList = React.memo(function SampleList({
                 clearInterval(interval);
             }
         };
-    }, [isAutoRefresh, refreshInterval]); // Removed fetchSamples dependency
+    }, [isAutoRefresh, refreshInterval]); // Removed fetchSamples to prevent re-render loop
 
     // Group samples by status with proper filtering and stable references
     const groupedSamples = useMemo(() => {
@@ -384,6 +367,37 @@ export const SampleList = React.memo(function SampleList({
         return grouped;
     }, [samples]);
 
+    // Pagination logic
+    const paginatedSamples = useMemo(() => {
+        if (filterStatus === 'all') {
+            // For "all" view, paginate within each group
+            const paginated: Record<string, WorkflowContext[]> = {};
+            Object.entries(groupedSamples).forEach(([groupKey, groupSamples]) => {
+                const startIndex = (currentPage - 1) * samplesPerPage;
+                const endIndex = startIndex + samplesPerPage;
+                paginated[groupKey] = groupSamples.slice(startIndex, endIndex);
+            });
+            return paginated;
+        } else {
+            // For specific status filter, paginate the flat list
+            const flatSamples = Object.values(groupedSamples).flat();
+            const startIndex = (currentPage - 1) * samplesPerPage;
+            const endIndex = startIndex + samplesPerPage;
+            return { [filterStatus]: flatSamples.slice(startIndex, endIndex) };
+        }
+    }, [groupedSamples, filterStatus, currentPage, samplesPerPage]);
+
+    // Calculate total pages
+    const totalSamples = useMemo(() => {
+        if (filterStatus === 'all') {
+            return Object.values(groupedSamples).reduce((sum, group) => sum + group.length, 0);
+        } else {
+            return Object.values(groupedSamples).flat().length;
+        }
+    }, [groupedSamples, filterStatus]);
+
+    const totalPages = Math.ceil(totalSamples / samplesPerPage);
+
     // Toggle group expansion
     const toggleGroup = useCallback((group: string) => {
         setExpandedGroups(prev => {
@@ -449,7 +463,12 @@ export const SampleList = React.memo(function SampleList({
                             {ContextStatus[sample.status]}
                         </Badge>
                         <div className="text-xs text-muted-foreground">
-                            <span>{rulesEngineService.formatDuration(sample.createdAt, sample.lastUpdatedAt)}</span>
+                            <span>
+                                {sample.status === ContextStatus.Active || sample.status === ContextStatus.Running ? 
+                                    rulesEngineService.formatDuration(sample.createdAt, new Date().toISOString()) :
+                                    rulesEngineService.formatDuration(sample.createdAt, sample.lastUpdatedAt)
+                                }
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -467,13 +486,15 @@ export const SampleList = React.memo(function SampleList({
 
     return (
         <div className="flex flex-col h-full bg-background">
+            {/* Sample List Pane */}
+            <div className="flex-1 flex flex-col min-h-0">
             {/* Header */}
             <div className="pl-8 pr-6 py-4 border-b space-y-3 flex-shrink-0">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <h2 className="text-lg font-semibold">Samples</h2>
                         <Badge variant="secondary" className="text-xs">
-                            {samples.length} of {samples.length >= 500 ? '500+' : samples.length}
+                            {totalSamples} samples
                         </Badge>
                     </div>
                     <div className="flex items-center gap-2">
@@ -504,7 +525,11 @@ export const SampleList = React.memo(function SampleList({
 
                 {/* Search */}
                 <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                    {isSearching ? (
+                        <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4 animate-spin" />
+                    ) : (
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                    )}
                     <Input
                         placeholder={
                             groupingType === 'order' ? "Search orders..." :
@@ -622,16 +647,16 @@ export const SampleList = React.memo(function SampleList({
 
             {/* Content with ScrollArea */}
             {!isLoading && !error && totalCount > 0 && (
-                <ScrollArea className="flex-1">
+                <ScrollArea className="flex-1 min-h-0">
                     <div className="pl-8 pr-6 py-4 space-y-4">
                         {/* When a specific status filter is selected, show flat list */}
                         {filterStatus !== 'all' ? (
                             <div className="space-y-2">
-                                {Object.values(groupedSamples).flat().map(renderSampleCard)}
+                                {Object.values(paginatedSamples).flat().map(renderSampleCard)}
                             </div>
                         ) : (
                             /* When "All" is selected, show grouped view */
-                            Object.entries(groupedSamples).map(([groupKey, groupSamples]) => (
+                            Object.entries(paginatedSamples).map(([groupKey, groupSamples]) => (
                                 <div key={groupKey}>
                                     <div
                                         className="flex items-center gap-2 mb-2 cursor-pointer select-none"
@@ -700,6 +725,54 @@ export const SampleList = React.memo(function SampleList({
                         <div className="text-muted-foreground mb-2">No samples found</div>
                         <div className="text-sm text-muted-foreground">
                             {searchTerm ? 'Try adjusting your search terms' : 'No samples match your current filters'}
+                        </div>
+                    </div>
+                </div>
+            )}
+            </div>
+
+            {/* Pagination Pane - Compact navigator */}
+            {!isLoading && !error && totalCount > 0 && totalPages > 1 && (
+                <div className="border-t bg-muted/20 px-4 py-2">
+                    <div className="flex items-center justify-between">
+                        <div className="text-xs text-muted-foreground">
+                            Page {currentPage} of {totalPages}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                disabled={currentPage === 1}
+                                className="h-6 px-2 text-xs"
+                            >
+                                ‹
+                            </Button>
+                            <div className="flex items-center gap-1">
+                                {Array.from({ length: Math.min(3, totalPages) }, (_, i) => {
+                                    const pageNum = i + 1;
+                                    return (
+                                        <Button
+                                            key={pageNum}
+                                            variant={currentPage === pageNum ? "default" : "ghost"}
+                                            size="sm"
+                                            onClick={() => setCurrentPage(pageNum)}
+                                            className="w-6 h-6 p-0 text-xs"
+                                        >
+                                            {pageNum}
+                                        </Button>
+                                    );
+                                })}
+                            </div>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                disabled={currentPage === totalPages}
+                                className="h-6 px-2 text-xs"
+                            >
+                                ›
+                            </Button>
                         </div>
                     </div>
                 </div>

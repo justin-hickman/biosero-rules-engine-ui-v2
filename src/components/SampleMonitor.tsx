@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Lightning, CheckCircle, XCircle, Clock, Code, MinusCircle } from '@phosphor-icons/react';
 import { Loader2, ChevronDown } from 'lucide-react';
 import { SampleList } from './SampleList';
@@ -59,6 +59,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     const [currentAutoRefresh, setCurrentAutoRefresh] = useState(isAutoRefresh);
     const lastStableDataRef = React.useRef<string | null>(null);
     const lastChainDataRef = React.useRef<ChainData | null>(null);
+    const [ruleStatusVersion, setRuleStatusVersion] = useState(0);
     
     // Handle auto-refresh state changes from SampleList
     const handleAutoRefreshChange = useCallback((isAutoRefresh: boolean) => {
@@ -73,14 +74,6 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     // Memoize chain data to prevent unnecessary re-renders with deep comparison
     const stableChainData = React.useMemo(() => {
         const currentData = dynamicChainData || fullChainData || chainData;
-        
-        console.log('🔧 Monitor: stableChainData calculation:', {
-            dynamicChainData: dynamicChainData ? 'exists' : 'null',
-            fullChainData: fullChainData ? 'exists' : 'null', 
-            chainData: chainData ? 'exists' : 'null',
-            currentData: currentData ? 'exists' : 'null',
-            nodeCount: currentData ? Object.keys(currentData.nodes || {}).length : 0
-        });
         
         // Create a stable reference that only changes when the actual content changes
         if (!currentData) return null;
@@ -379,7 +372,6 @@ export const SampleMonitor = React.memo(function SampleMonitor({
 
     // Fetch chain execution details using the new rich payload structure
     const fetchChainExecution = useCallback(async (context: WorkflowContext) => {
-        console.log('🚀 Monitor: fetchChainExecution called for context:', context.contextId);
         // Only show loading on initial load, not during auto-refresh
         if (isInitialChainLoad) {
         setIsLoadingChain(true);
@@ -410,30 +402,39 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     chainContext = response.items[0];
                 }
                 
-                console.log('📊 Monitor: Found chain context:', {
-                    chainId: chainContext.chainId,
-                    status: chainContext.status,
-                    isActive: chainContext.isActive,
-                    isComplete: chainContext.isComplete,
-                    rulesCount: chainContext.rules?.length || 0,
-                    historyLength: chainContext.ruleStatusHistory?.length || 0
-                });
                 
                 // Only update chainExecution if it has actually changed
                 setChainExecution(prevExecution => {
+                    // Quick shallow checks first
                     if (!prevExecution || 
                         prevExecution.chainId !== chainContext.chainId ||
                         prevExecution.status !== chainContext.status ||
                         prevExecution.isActive !== chainContext.isActive ||
                         prevExecution.isComplete !== chainContext.isComplete) {
-                        return chainContext;
+                        // Return new object to force re-render
+                        return { ...chainContext };
                     }
-                    return prevExecution;
+                    
+                    // Check if rules array changed (length or individual statuses)
+                    if (prevExecution.rules?.length !== chainContext.rules?.length) {
+                        return { ...chainContext };
+                    }
+                    
+                    // Check for rule status changes
+                    const hasRuleStatusChange = prevExecution.rules?.some((rule: any, idx: number) => 
+                        rule.status !== chainContext.rules?.[idx]?.status ||
+                        rule.identifier !== chainContext.rules?.[idx]?.identifier
+                    );
+                    
+                    // Force new reference if rules changed
+                    if (hasRuleStatusChange) {
+                        setRuleStatusVersion(v => v + 1);
+                    }
+                    return hasRuleStatusChange ? { ...chainContext } : prevExecution;
                 });
                 
                 // Build full chain from starting rule using payload data
                 if (chainContext.initialRuleName) {
-                    console.log('🔍 Monitor: Building full chain from starting rule:', chainContext.initialRuleName);
                     await buildFullChain(chainContext.initialRuleName, chainContext);
                 }
                 
@@ -473,58 +474,39 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     edgeKeys: (chainData.edges || []).map(e => `${e.from}-${e.to}-${e.type}`).sort()
                 });
                 
-                // Only update if data has actually changed
+                // Update chainExecution immediately (no debounce for status changes)
+                // This ensures real-time status updates
+                
+                // Only debounce dynamicChainData updates to prevent flickering
                 if (lastStableDataRef.current !== chainDataKey) {
-                    // Debounce chain data updates to prevent flickering
                     const now = Date.now();
-                    if (now - lastChainUpdate.current > 5000) { // 5 second debounce for responsive streaming
+                    if (now - lastChainUpdate.current > 100) { // 100ms debounce for very responsive updates
                         lastChainUpdate.current = now;
                         lastStableDataRef.current = chainDataKey;
                         
-                        console.log('🔄 Monitor: Updating dynamic chain data with new content');
-                        console.log('🔄 Monitor: Setting dynamicChainData to:', chainData);
                         // Additional deep comparison to prevent flickering
                         const chainDataString = JSON.stringify(chainData);
                         const lastDataString = lastChainDataRef.current ? JSON.stringify(lastChainDataRef.current) : null;
                         
                         if (chainDataString !== lastDataString) {
                             lastChainDataRef.current = chainData;
-                            console.log('🔄 Monitor: Calling setDynamicChainData with:', chainData);
-                        setDynamicChainData(chainData);
-                        } else {
-                            console.log('⏸️ Monitor: Chain data identical, skipping update');
+                            setDynamicChainData(chainData);
                         }
-                } else {
-                        console.log('⏸️ Monitor: Skipping chain data update (debounced)');
-                }
-            } else {
-                    console.log('⏸️ Monitor: Skipping chain data update (no content changes)');
+                    }
                 }
                 
-                console.log('✅ Monitor: Chain execution loaded with rich data:', {
-                    chainId: chainContext.chainId,
-                    status: chainContext.status,
-                    isActive: chainContext.isActive,
-                    isComplete: chainContext.isComplete,
-                    progress: chainContext.progress,
-                    performanceMetrics: chainContext.performanceMetrics
-                });
-                console.log(`✅ Monitor: Loaded execution chain: ${chainContext.status}`);
                 } else {
                     setChainExecution(null);
                 setDynamicChainData(null);
-                console.log('❌ Monitor: No chain execution found');
-                console.log('❌ Monitor: Chain details not found');
             }
         } catch (error) {
-            console.error('❌ Monitor: Failed to fetch chain execution:', error);
             setChainExecution(null);
-            console.log('❌ Monitor: Failed to load execution chain. Please try again.');
         } finally {
             setIsLoadingChain(false);
             setIsInitialChainLoad(false);
         }
     }, [rulesEngineService, buildFullChain, buildChainDataFromPayload]);
+
 
     // Handle sample selection
     const handleSampleSelect = useCallback(async (context: WorkflowContext) => {
@@ -751,21 +733,17 @@ export const SampleMonitor = React.memo(function SampleMonitor({
 
         if (!selectedContext || !chainExecution) return;
 
-        // Check if we should poll (only if auto-refresh is enabled and chain is active)
-        const shouldPoll = currentAutoRefresh && !chainExecution.isComplete && chainExecution.isActive;
+        // Only poll when a sample is selected and displayed in canvas (not for all samples)
+        const shouldPoll = currentAutoRefresh && !!selectedContext && !!chainExecution;
 
         if (shouldPoll) {
             const interval = setInterval(async () => {
                 try {
-                    // Only fetch if we haven't updated recently to prevent excessive API calls
-                    const now = Date.now();
-                    if (now - lastChainUpdate.current > 3000) { // 3 second minimum between updates
                     await fetchChainExecution(selectedContext);
-                    }
                 } catch (error) {
                     console.error('Polling error:', error);
                 }
-            }, 8000); // Poll every 8 seconds for responsive streaming
+            }, 1000); // Poll every 1 second for real-time canvas updates (only for selected sample)
 
             setPollingInterval(interval);
         }
@@ -775,7 +753,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 clearInterval(pollingInterval);
             }
         };
-    }, [selectedContext, chainExecution?.isActive, chainExecution?.isComplete, currentAutoRefresh]);
+    }, [selectedContext, currentAutoRefresh, fetchChainExecution]);
 
     return (
         <div className="fixed inset-0 top-14 bg-background">
@@ -832,7 +810,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 ) : stableChainData ? (
                     <div className="h-full">
                         <MonitorChainFlowWrapper
-                            key={stableChainData?._stableKey || 'no-data'}
+                            key={`${stableChainData?._stableKey || 'no-data'}-v${ruleStatusVersion}`}
                             chainData={stableChainData}
                             executionHistory={chainExecution.ruleStatusHistory}
                             currentRuleName={chainExecution.currentRuleName}
@@ -1030,7 +1008,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                                                     <span className="text-sm">Running</span>
                                                                 </div>
                                                             ) : action.status === 'Completed' ? (
-                                                                <div className="flex items-center gap-1" style={{ color: '#00D437' }}>
+                                                                <div className="flex items-center gap-1" style={{ color: '#00FF41' }}>
                                                                     <CheckCircle className="w-4 h-4" />
                                                                     <span className="text-sm">Completed</span>
                                                                 </div>

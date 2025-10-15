@@ -93,14 +93,6 @@ interface MonitorNodeData {
 const MonitorNode = ({ data }: { data: MonitorNodeData }) => {
     const isRule = !data.isAction;
     
-    // Debug logging to see what data is being passed
-    console.log('🔍 MonitorNode data:', {
-        isAction: data.isAction,
-        label: data.label,
-        ruleName: data.ruleName,
-        ruleId: data.ruleId,
-        actionType: data.actionType
-    });
     
     const getStatusIcon = () => {
         switch (data.status) {
@@ -378,22 +370,19 @@ function MonitorChainFlowInner({
     onNodeClick,
     chainContext
 }: MonitorChainFlowProps) {
+    // Force re-render every second while chain is active
+    const [, setForceUpdate] = useState(0);
+
+    useEffect(() => {
+        if (chainContext?.isActive && !chainContext?.isComplete) {
+            const timer = setInterval(() => {
+                setForceUpdate(v => v + 1);
+            }, 1000); // Update every 1 second for real-time animations (only for selected sample)
+            return () => clearInterval(timer);
+        }
+    }, [chainContext?.isActive, chainContext?.isComplete]);
     // Calculate nodes and edges from chain data or execution history
     const { nodes, edges } = useMemo(() => {
-        console.log('🔍 MonitorChainFlow: Processing chain data:', {
-            chainData: chainData ? {
-                nodeCount: Object.keys(chainData.nodes).length,
-                edgeCount: chainData.edges.length,
-                nodeIds: Object.keys(chainData.nodes),
-                edges: chainData.edges.map(e => `${e.from} -> ${e.to}`)
-            } : null,
-            executionHistory: executionHistory.map(r => ({
-                ruleName: r.ruleName,
-                isSuccess: r.isSuccess,
-                errorMessage: r.errorMessage
-            })),
-            currentRuleName
-        });
         
         const newNodes: Node[] = [];
         const newEdges: Edge[] = [];
@@ -403,12 +392,9 @@ function MonitorChainFlowInner({
         
         // Use new ChainContext data if available
         if (chainContext?.rules && chainContext.rules.length > 0) {
-            console.log('📊 MonitorChainFlow: Using ChainContext rules array:', chainContext.rules);
-            console.log('📊 MonitorChainFlow: ChainContext ruleStatusMap:', chainContext.ruleStatusMap);
             
             // Use the rules array from BRE endpoint DTO
             chainContext.rules.forEach((rule: any) => {
-                console.log(`📊 MonitorChainFlow: Processing rule ${rule.identifier} with status: "${rule.status}"`);
                 switch (rule.status) {
                     case 'Success':
                         nodeStatuses[rule.identifier] = 'success';
@@ -421,15 +407,12 @@ function MonitorChainFlowInner({
                         nodeStatuses[rule.identifier] = 'pending';
                         break;
                     default:
-                        console.log(`📊 MonitorChainFlow: Unknown status "${rule.status}" for rule ${rule.identifier}, defaulting to pending`);
                         nodeStatuses[rule.identifier] = 'pending';
                 }
             });
             
-            console.log('📊 MonitorChainFlow: Final nodeStatuses:', nodeStatuses);
         } else {
             // Fallback to legacy execution history
-            console.log('📊 MonitorChainFlow: Using legacy execution history');
             executionHistory.forEach((result) => {
                 nodeStatuses[result.ruleName] = result.isSuccess ? 'success' : 'failed';
                 
@@ -490,9 +473,7 @@ function MonitorChainFlowInner({
                     if (ruleAction) {
                         displayName = ruleAction.ruleName;
                         ruleIdentifier = ruleAction.ruleId;
-                        console.log(`📊 Found rule name for ${nodeId}:`, { ruleName: ruleAction.ruleName, ruleId: ruleAction.ruleId });
                     } else {
-                        console.log(`⚠️ No rule action found for ${nodeId} in actions array`);
                     }
                 }
 
@@ -554,13 +535,6 @@ function MonitorChainFlowInner({
                 const edgeStyle = edge.style || {};
                 const edgeAnimated = edge.animated || false;
                 
-                console.log(`🎨 MonitorChainFlow: Edge ${edge.from} -> ${edge.to}:`, {
-                    type: edge.type,
-                    style: edgeStyle,
-                    animated: edgeAnimated,
-                    isActivePath,
-                    isExecuted
-                });
                 
                 newEdges.push({
                     id: `edge-${index}`,
@@ -595,24 +569,11 @@ function MonitorChainFlowInner({
                 const ruleNodeId = result.ruleName;
                 const status = nodeStatuses[ruleNodeId] || 'pending';
                 
-                // Debug: Log what we're working with
-                console.log('Processing rule:', result.ruleName, 'from execution history');
-                console.log('Available chainContext:', {
-                    hasChainStructure: !!chainContext?.chainStructure,
-                    hasActions: !!chainContext?.chainStructure?.actions,
-                    actionsCount: chainContext?.chainStructure?.actions?.length || 0,
-                    allActions: chainContext?.chainStructure?.actions?.map(a => ({ ruleId: a.ruleId, ruleName: a.ruleName })) || []
-                });
-                
                 // Try to find rule name from actions array
                 const ruleAction = chainContext?.chainStructure?.actions?.find((a: any) => a.ruleId === result.ruleName);
-                console.log('Found rule action:', ruleAction);
-                
                 // Use rule name from actions if found, otherwise use a formatted version
                 const ruleDisplayName = ruleAction?.ruleName || `Rule: ${result.ruleName}`;
                 const ruleId = ruleAction?.ruleId || result.ruleName;
-                
-                console.log('Final values:', { ruleDisplayName, ruleId });
                 
                 // Create rule node with BRE data
                 const ruleNode = {
@@ -694,14 +655,14 @@ function MonitorChainFlowInner({
                             animated: true, // Animate executed paths
                             data: { success: result.isSuccess }, // Add data attribute for CSS targeting
                             style: {
-                                stroke: result.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                                stroke: result.isSuccess ? '#00FF41' : '#ef4444', // Bright neon green #00FF41
                                 strokeWidth: 4, // Match width from chainData
                                 strokeDasharray: '8,4', // Consistent dash pattern
                                 filter: undefined // Remove glow
                             },
                             markerEnd: {
                                 type: MarkerType.ArrowClosed,
-                                color: result.isSuccess ? '#00D437' : '#ef4444', // Bright green #00D437 to match progress bar
+                                color: result.isSuccess ? '#00FF41' : '#ef4444', // Bright neon green #00FF41
                                 width: 8, // Consistent arrow size
                                 height: 8,
                             },
@@ -718,24 +679,12 @@ function MonitorChainFlowInner({
             
             // Add current rule if not in history
             if (currentRuleName && !executionHistory.find(r => r.ruleName === currentRuleName)) {
-                // Debug: Log what we're working with for current rule
-                console.log('Processing current rule:', currentRuleName);
-                console.log('Available chainContext for current rule:', {
-                    hasChainStructure: !!chainContext?.chainStructure,
-                    hasActions: !!chainContext?.chainStructure?.actions,
-                    actionsCount: chainContext?.chainStructure?.actions?.length || 0,
-                    allActions: chainContext?.chainStructure?.actions?.map(a => ({ ruleId: a.ruleId, ruleName: a.ruleName })) || []
-                });
-                
                 // Try to find rule name from actions array
                 const ruleAction = chainContext?.chainStructure?.actions?.find((a: any) => a.ruleId === currentRuleName);
-                console.log('Found current rule action:', ruleAction);
                 
                 // Use rule name from actions if found, otherwise use a formatted version
                 const ruleDisplayName = ruleAction?.ruleName || `Rule: ${currentRuleName}`;
                 const ruleId = ruleAction?.ruleId || currentRuleName;
-                
-                console.log('Final current rule values:', { ruleDisplayName, ruleId });
                 
                 const currentNode = {
                     id: currentRuleName,
@@ -793,7 +742,7 @@ function MonitorChainFlowInner({
         }
 
         return { nodes: newNodes, edges: newEdges };
-    }, [chainData, executionHistory, currentRuleName, chainContext]);
+    }, [chainData, executionHistory, currentRuleName, chainContext, chainContext?.rules]);
 
     const handleNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
         if (onNodeClick) {

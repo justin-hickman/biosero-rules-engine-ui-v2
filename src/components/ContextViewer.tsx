@@ -110,21 +110,12 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
     // Load metrics when context is selected or metrics tab is selected
     React.useEffect(() => {
         if (context && (!systemMetrics || !ruleStats || !activeProcessing) && !metricsLoading) {
-            console.log('🔧 ContextViewer: Fetching metrics for context:', context.contextId);
             setMetricsLoading(true);
             Promise.all([
                 rulesEngineService.getSystemMetrics(),
                 rulesEngineService.getRuleStats(),
                 rulesEngineService.getActiveProcessingStats()
             ]).then(([metrics, stats, processing]) => {
-                console.log('🔧 ContextViewer: Metrics loaded:', { metrics, stats, processing });
-                console.log('🔧 ContextViewer: Metrics structure check:', {
-                    metrics: metrics ? 'exists' : 'null',
-                    stats: stats ? 'exists' : 'null', 
-                    processing: processing ? 'exists' : 'null',
-                    statsStats: stats?.stats ? 'exists' : 'null',
-                    processingStats: processing?.processingStats ? 'exists' : 'null'
-                });
                 setSystemMetrics(metrics);
                 setRuleStats(stats);
                 setActiveProcessing(processing);

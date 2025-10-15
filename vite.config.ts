@@ -17,9 +17,14 @@ export default defineConfig({
     }
   },
   server: {
-    host: 'localhost',        // listen on localhost only
+    host: '0.0.0.0',          // listen on all interfaces to allow ngrok
     port: 5173,
     strictPort: true,
+    allowedHosts: [
+      'localhost',
+      'sinewy-yvette-overheavily.ngrok-free.dev',
+      '.ngrok-free.dev'       // Allow all ngrok subdomains
+    ],
     hmr: {
       protocol: 'ws',         // HMR over regular WebSocket
       host: 'localhost',
