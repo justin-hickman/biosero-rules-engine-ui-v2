@@ -173,8 +173,24 @@ export const SampleList = React.memo(function SampleList({
                         (chain.status === 'Failed' ? 3 : 2) : // Failed or Complete
                         (chain.isActive ? 1 : 0); // Active or Ready
                     
+                    // Extract orderId and batchId from top-level fields
+                    const orderId = chain.orderId || undefined;
+                    const batchId = chain.batchId || undefined;
+                    
+                    console.log('🔍 SampleList: Extracting fields:', {
+                        chainId: chainId,
+                        topLevelOrderId: chain.orderId,
+                        topLevelBatchId: chain.batchId,
+                        topLevelSampleId: chain.sampleId,
+                        extractedOrderId: orderId,
+                        extractedBatchId: batchId,
+                        extractedSampleId: sampleId
+                    });
+                    
                     return {
                         contextId: chainId,
+                        orderId: orderId,
+                        batchId: batchId,
                         sampleId: sampleId,
                         status: status as ContextStatus,
                         lastUpdatedAt: chain.startTimestamp,
@@ -276,12 +292,33 @@ export const SampleList = React.memo(function SampleList({
         const filtered = samples.filter(sample => {
             // Grouping type filter - filter to only show items with the selected field populated
             if (groupingTypeRef.current === 'order' && !sample.orderId) {
+                console.log('🔍 Filtering out sample (no orderId):', { 
+                    sampleId: sample.sampleId, 
+                    orderId: sample.orderId, 
+                    batchId: sample.batchId,
+                    hasOrderId: !!sample.orderId,
+                    orderIdType: typeof sample.orderId
+                });
                 return false;
             }
             if (groupingTypeRef.current === 'batch' && !sample.batchId) {
+                console.log('🔍 Filtering out sample (no batchId):', { 
+                    sampleId: sample.sampleId, 
+                    orderId: sample.orderId, 
+                    batchId: sample.batchId,
+                    hasBatchId: !!sample.batchId,
+                    batchIdType: typeof sample.batchId
+                });
                 return false;
             }
             if (groupingTypeRef.current === 'sample' && !sample.sampleId) {
+                console.log('🔍 Filtering out sample (no sampleId):', { 
+                    sampleId: sample.sampleId, 
+                    orderId: sample.orderId, 
+                    batchId: sample.batchId,
+                    hasSampleId: !!sample.sampleId,
+                    sampleIdType: typeof sample.sampleId
+                });
                 return false;
             }
 
@@ -367,7 +404,6 @@ export const SampleList = React.memo(function SampleList({
                 total: samples.length,
                 filtered: filtered.length,
                 groupingType: groupingTypeRef.current,
-                sampleDetails: filtered.map(s => ({ sampleId: s.sampleId, orderId: s.orderId, batchId: s.batchId })),
                 groups: Object.keys(grouped).reduce((acc, key) => {
                     acc[key] = grouped[key].length;
                     return acc;

@@ -788,19 +788,46 @@ export class RulesEngineService {
                 }
                 
                 // Extract batchId - NEW DTO has batchId at top level
+                console.log(`🔍 Extracting batchId:`, {
+                    chainId: chain.chainId,
+                    topLevelBatchId: chain.batchId,
+                    variablesBatchId: chain.variables?.batchId,
+                    topLevelType: typeof chain.batchId,
+                    topLevelIsNull: chain.batchId === null,
+                    topLevelIsUndefined: chain.batchId === undefined
+                });
+                
                 if (chain.batchId !== null && chain.batchId !== undefined) {
                     batchId = chain.batchId;
+                    console.log(`✅ Using top-level batchId: ${batchId}`);
                 } else if (chain.variables?.batchId) {
                     batchId = chain.variables.batchId;
+                    console.log(`✅ Using variables batchId: ${batchId}`);
+                } else {
+                    console.log(`❌ No batchId found`);
                 }
                 
                 // Extract orderId - NEW DTO has orderId at top level
+                console.log(`🔍 Extracting orderId:`, {
+                    chainId: chain.chainId,
+                    topLevelOrderId: chain.orderId,
+                    variablesOrderId: chain.variables?.orderId,
+                    topLevelType: typeof chain.orderId,
+                    topLevelIsNull: chain.orderId === null,
+                    topLevelIsUndefined: chain.orderId === undefined
+                });
+                
                 if (chain.orderId !== null && chain.orderId !== undefined) {
                     orderId = chain.orderId;
+                    console.log(`✅ Using top-level orderId: ${orderId}`);
                 } else if (chain.variables?.orderId) {
                     orderId = chain.variables.orderId;
+                    console.log(`✅ Using variables orderId: ${orderId}`);
                 } else if (chain.variables?.OrderId) {
                     orderId = chain.variables.OrderId;
+                    console.log(`✅ Using variables OrderId: ${orderId}`);
+                } else {
+                    console.log(`❌ No orderId found`);
                 }
                 
                 // If no sampleId found, try to generate one from available data
@@ -826,6 +853,14 @@ export class RulesEngineService {
                     batchId,
                     orderId,
                     status: chain.status,
+                    rawChainData: {
+                        topLevelOrderId: chain.orderId,
+                        topLevelBatchId: chain.batchId,
+                        topLevelSampleId: chain.sampleId,
+                        variablesOrderId: chain.variables?.orderId,
+                        variablesBatchId: chain.variables?.batchId,
+                        variablesSampleId: chain.variables?.sampleId
+                    },
                     dataSources: {
                         sampleIdSource: chain.sampleId ? 'topLevel.sampleId' :
                                       chain.variables?.sampleId ? 'variables.sampleId' : 
