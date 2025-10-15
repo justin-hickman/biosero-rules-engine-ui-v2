@@ -2403,7 +2403,7 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
                                         <SimpleRuleSelector
                                             dataServicesRootURI={dataServicesRootURI || ""}
                                             onRuleSelect={(ruleId) => setEditingNodeData({
-                                                ...editingNodeData,
+                                                ...editingNodeData, 
                                                 targetRuleId: ruleId
                                             })}
                                             value={editingNodeData?.targetRuleId || ''}

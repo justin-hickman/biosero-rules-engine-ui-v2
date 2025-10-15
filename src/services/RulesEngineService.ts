@@ -89,6 +89,7 @@ export interface ChainStructure {
         type: string; // success, failure
     }>;
     actions: Array<{
+        ruleId: string;
         ruleName: string;
         actionType: string;
         templateName: string | null;

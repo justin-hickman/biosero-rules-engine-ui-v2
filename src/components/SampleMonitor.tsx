@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Lightning, CheckCircle, XCircle, Clock, Code } from '@phosphor-icons/react';
-import { Loader2 } from 'lucide-react';
+import { Lightning, CheckCircle, XCircle, Clock, Code, MinusCircle } from '@phosphor-icons/react';
+import { Loader2, ChevronDown } from 'lucide-react';
 import { SampleList } from './SampleList';
 import { MonitorChainFlowWrapper } from './MonitorChainFlow';
 import { ContextViewer } from './ContextViewer';
@@ -18,6 +18,7 @@ import { apiFetchRuleDetails } from '../App';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Button } from './ui/button';
 
 interface SampleMonitorProps {
@@ -669,39 +670,102 @@ export const SampleMonitor = React.memo(function SampleMonitor({
         if (chainExecution?.ruleStatusHistory) {
             const foundResult = chainExecution.ruleStatusHistory.find(r => r.ruleName === nodeId);
             if (foundResult) {
-                executionResult = foundResult;
+                // Derive isFailed and isPending flags from the ruleStatusHistory result
+                const isFailed = !foundResult.isSuccess && foundResult.evaluatedAt != null;
+                const isPending = foundResult.evaluatedAt == null;
+                
+                executionResult = {
+                    ...foundResult,
+                    isFailed: isFailed,
+                    isPending: isPending
+                };
                 usedVariables = (foundResult as any).usedVariables || {};
                 console.log('📊 Monitor: Found execution result with used variables:', {
                     ruleName: foundResult.ruleName,
                     isSuccess: foundResult.isSuccess,
+                    isFailed: isFailed,
+                    isPending: isPending,
                     usedVariables: Object.keys(usedVariables),
-                    evaluatedAt: foundResult.evaluatedAt
+                    evaluatedAt: foundResult.evaluatedAt,
+                    hasErrorMessage: !!foundResult.errorMessage
                 });
             }
         }
         
         // Also check if this rule has been evaluated and get its status
-        const ruleStatus = chainExecution?.ruleStatusMap?.[nodeId];
+        // ruleStatusMap uses lowercase keys, so we need to convert nodeId to lowercase
+        const ruleStatus = chainExecution?.ruleStatusMap?.[nodeId.toLowerCase()];
         const ruleInfo = chainExecution?.rules?.find(r => r.identifier === nodeId);
         
         console.log('🔍 Monitor: Rule info for clicked node:', {
             nodeId,
+            nodeIdLowercase: nodeId.toLowerCase(),
             ruleStatus,
             ruleInfo,
-            hasExecutionResult: !!executionResult
+            hasExecutionResult: !!executionResult,
+            ruleStatusMapKeys: Object.keys(chainExecution?.ruleStatusMap || {}),
+            ruleStatusMapValue: chainExecution?.ruleStatusMap?.[nodeId.toLowerCase()]
         });
         
-        // Check if this rule has actions in progress using chainStructure
-        if (chainExecution?.chainStructure?.actions) {
-            const ruleActions = chainExecution.chainStructure.actions.filter(a => a.ruleName === nodeId);
-            if (ruleActions.length > 0) {
+        // Debug: Log actionExecutionRecords availability
+        console.log('🔍 Dialog: actionExecutionRecords data:', {
+            hasActionExecutionRecords: !!chainExecution?.actionExecutionRecords,
+            recordsCount: chainExecution?.actionExecutionRecords?.length || 0,
+            hasChainStructureActions: !!chainExecution?.chainStructure?.actions,
+            chainActionsCount: chainExecution?.chainStructure?.actions?.length || 0
+        });
+        
+        // Check if this rule has action execution records
+        if (chainExecution?.actionExecutionRecords) {
+            // Find rule display name for this rule ID
+            const ruleDisplayName = chainExecution.chainStructure?.actions?.find(a => a.ruleId === nodeId)?.ruleName || nodeId;
+            console.log(`🔍 Dialog: Looking for actions for rule ${nodeId} (${ruleDisplayName})`);
+            
+            // Filter execution records by rule display name
+            const ruleExecutionRecords = chainExecution.actionExecutionRecords.filter(record => 
+                record.actionInstanceId?.includes(ruleDisplayName)
+            );
+            
+            console.log(`🔍 Dialog: Found ${ruleExecutionRecords.length} execution records for rule ${ruleDisplayName}:`, 
+                ruleExecutionRecords.map(r => r.actionInstanceId));
+            
+            if (ruleExecutionRecords.length > 0) {
+                // Create enhanced actions from execution records
+                const enhancedActions = ruleExecutionRecords.map(executionRecord => {
+                    // Parse actionInstanceId to extract action type
+                    // Format: "RuleName_action_N_ActionType_..."
+                    const parts = executionRecord.actionInstanceId.split('_');
+                    const actionTypeIndex = parts.findIndex(p => p === 'action') + 2;
+                    const actionType = parts[actionTypeIndex] || 'Unknown';
+                    
+                    console.log(`🔍 Dialog: Parsed action from ${executionRecord.actionInstanceId}:`, {
+                        actionType,
+                        executedAt: executionRecord.executedAt,
+                        succeeded: executionRecord.succeeded
+                    });
+                    
+                    return {
+                        ruleId: nodeId,
+                        ruleName: ruleDisplayName,
+                        actionType: actionType,
+                        templateName: null,
+                        executionRecord: executionRecord,
+                        inputParameters: executionRecord.inputParameters || {},
+                        outputParameters: executionRecord.outputParameters || {},
+                        status: executionRecord.succeeded ? 'Completed' : 'Failed',
+                        startTime: executionRecord.executedAt,
+                        endTime: executionRecord.executedAt,
+                        errorMessage: executionRecord.errorMessage
+                    };
+                });
+                
                 actionStatus = {
-                    actions: ruleActions,
+                    actions: enhancedActions,
                     inProgress: chainExecution.isActive && chainExecution.currentRuleName === nodeId
                 };
-                console.log('⚡ Monitor: Found actions for rule:', {
+                console.log('⚡ Monitor: Found actions for rule with execution details:', {
                     ruleName: nodeId,
-                    actions: ruleActions,
+                    actionsCount: enhancedActions.length,
                     inProgress: actionStatus?.inProgress
                 });
             }
@@ -739,8 +803,46 @@ export const SampleMonitor = React.memo(function SampleMonitor({
             });
         }
         
+        // Debug: Log what chainExecution data is available
+        console.log('🔍 Dialog: chainExecution data available:', {
+            hasChainStructure: !!chainExecution?.chainStructure,
+            hasActions: !!chainExecution?.chainStructure?.actions,
+            actionsCount: chainExecution?.chainStructure?.actions?.length || 0,
+            actions: chainExecution?.chainStructure?.actions?.map(a => ({ ruleId: a.ruleId, ruleName: a.ruleName })) || [],
+            nodeId: nodeId
+        });
+        
+        // Look up rule name from chainContext actions array for proper dialog display
+        let ruleName = nodeId;
+        let ruleId = nodeId;
+        
+        if (chainExecution?.chainStructure?.actions) {
+            // Try to find by ruleId first (for most dynamic nodes)
+            let ruleAction = chainExecution.chainStructure.actions.find((a: any) => a.ruleId === nodeId);
+            
+            // If not found, try by ruleName (for the 3 rogue nodes and some edge cases)
+            if (!ruleAction) {
+                ruleAction = chainExecution.chainStructure.actions.find((a: any) => a.ruleName === nodeId);
+                console.log(`📊 Dialog: Trying ruleName lookup for ${nodeId}:`, { found: !!ruleAction });
+            }
+            
+            if (ruleAction) {
+                ruleName = ruleAction.ruleName;
+                ruleId = ruleAction.ruleId;
+                console.log(`📊 Dialog: Found rule for ${nodeId}:`, { 
+                    ruleName: ruleAction.ruleName, 
+                    ruleId: ruleAction.ruleId,
+                    lookupMethod: ruleAction.ruleId === nodeId ? 'by ruleId' : 'by ruleName'
+                });
+            } else {
+                console.log(`⚠️ Dialog: No rule action found for ${nodeId} in actions array (tried both ruleId and ruleName)`);
+            }
+        }
+
         setSelectedNodeDetails({
             nodeId,
+            ruleName,  // Add rule name for dialog display
+            ruleId,    // Add rule ID for dialog display
             executionResult,
             variables,
             usedVariables,
@@ -980,29 +1082,35 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                             </div>
                                             
                                             <div>
-                                                <label className="text-sm font-medium text-muted-foreground">Variables Used in Evaluation</label>
-                                            {selectedNodeDetails.executionResult?.isPending || !selectedNodeDetails.executionResult ? (
-                                                    <div className="mt-1 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
-                                                        <div className="text-sm text-yellow-800 dark:text-yellow-200 italic">
-                                                            Rule is pending evaluation - no variables have been used yet
-                                                        </div>
-                                                    </div>
-                                                ) : selectedNodeDetails.usedVariables && Object.keys(selectedNodeDetails.usedVariables).length > 0 ? (
-                                                    <div className="mt-1 space-y-1">
-                                                        {Object.entries(selectedNodeDetails.usedVariables).map(([varName, varValue]) => (
-                                                            <div key={varName} className="flex justify-between items-center p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-                                                                <span className="font-medium text-green-800 dark:text-green-200">{varName}</span>
-                                                                <span className="text-green-600 dark:text-green-400">{String(varValue)}</span>
+                                                <Collapsible defaultOpen={false}>
+                                                    <CollapsibleTrigger className="flex items-center gap-2 w-full hover:bg-muted/50 p-2 rounded-md transition-colors">
+                                                        <label className="text-sm font-medium text-muted-foreground">
+                                                            Variables Used in Evaluation
+                                                        </label>
+                                                        <ChevronDown className="w-4 h-4" />
+                                                    </CollapsibleTrigger>
+                                                    <CollapsibleContent>
+                                                        {selectedNodeDetails.executionResult?.isPending || !selectedNodeDetails.executionResult ? (
+                                                            <div className="mt-1 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
+                                                                <div className="text-sm text-yellow-800 dark:text-yellow-200 italic">
+                                                                    Rule is pending evaluation - no variables have been used yet
+                                                                </div>
                                                             </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <div className="mt-1 p-3 bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-800 rounded-md">
-                                                        <div className="text-sm text-gray-600 dark:text-gray-400 italic">
-                                                            No variables were used in this rule evaluation
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                        ) : selectedNodeDetails.usedVariables && (Array.isArray(selectedNodeDetails.usedVariables) ? selectedNodeDetails.usedVariables.length > 0 : Object.keys(selectedNodeDetails.usedVariables).length > 0) ? (
+                                                            <div className="mt-1 p-3 bg-muted/50 rounded-md">
+                                                                <pre className="text-xs font-mono overflow-auto max-h-96 whitespace-pre-wrap">
+                                                                    {JSON.stringify(selectedNodeDetails.usedVariables, null, 2)}
+                                                                </pre>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="mt-1 p-3 bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-800 rounded-md">
+                                                                <div className="text-sm text-gray-600 dark:text-gray-400 italic">
+                                                                    No variables were used in this rule evaluation
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </CollapsibleContent>
+                                                </Collapsible>
                                             </div>
                                         </div>
                                     </CardContent>
@@ -1029,7 +1137,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                     <CardContent>
                                         <div className="space-y-3">
                                             {selectedNodeDetails.actionStatus.actions.map((action: any, index: number) => (
-                                                <div key={index} className="p-3 border rounded-md">
+                                                <div key={index} className="p-3 border rounded-md space-y-2">
                                                     <div className="flex items-center justify-between">
                                                         <div>
                                                             <div className="font-medium">{action.actionType || 'Unknown Action'}</div>
@@ -1045,14 +1153,59 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                                                     <Loader2 className="w-4 h-4 animate-spin" />
                                                                     <span className="text-sm">Running</span>
                                                                 </div>
-                                                            ) : (
+                                                            ) : action.status === 'Completed' ? (
                                                                 <div className="flex items-center gap-1" style={{ color: '#00D437' }}>
                                                                     <CheckCircle className="w-4 h-4" />
                                                                     <span className="text-sm">Completed</span>
                                                                 </div>
+                                                            ) : action.status === 'Failed' ? (
+                                                                <div className="flex items-center gap-1 text-red-600">
+                                                                    <XCircle className="w-4 h-4" />
+                                                                    <span className="text-sm">Failed</span>
+                                                                </div>
+                                                            ) : action.status === 'Not Executed' ? (
+                                                                <div className="flex items-center gap-1 text-gray-400">
+                                                                    <MinusCircle className="w-4 h-4" />
+                                                                    <span className="text-sm">Not Executed</span>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex items-center gap-1 text-gray-600">
+                                                                    <Clock className="w-4 h-4" />
+                                                                    <span className="text-sm">{action.status || 'Unknown'}</span>
+                                                                </div>
                                                             )}
                                                         </div>
                                                     </div>
+                                                    
+                                                    {/* Show Input Parameters */}
+                                                    {action.inputParameters && Object.keys(action.inputParameters).length > 0 && (
+                                                        <div className="mt-2">
+                                                            <div className="text-xs font-medium text-muted-foreground mb-1">Input Parameters:</div>
+                                                            <div className="space-y-1">
+                                                                {Object.entries(action.inputParameters).map(([key, value]) => (
+                                                                    <div key={key} className="flex justify-between items-center p-1.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs">
+                                                                        <span className="font-medium text-blue-800 dark:text-blue-200">{key}</span>
+                                                                        <span className="text-blue-600 dark:text-blue-400 truncate max-w-[200px]">{String(value)}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {/* Show Output Parameters */}
+                                                    {action.outputParameters && Object.keys(action.outputParameters).length > 0 && (
+                                                        <div className="mt-2">
+                                                            <div className="text-xs font-medium text-muted-foreground mb-1">Output Parameters:</div>
+                                                            <div className="space-y-1">
+                                                                {Object.entries(action.outputParameters).map(([key, value]) => (
+                                                                    <div key={key} className="flex justify-between items-center p-1.5 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded text-xs">
+                                                                        <span className="font-medium text-purple-800 dark:text-purple-200">{key}</span>
+                                                                        <span className="text-purple-600 dark:text-purple-400 truncate max-w-[200px]">{String(value)}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>

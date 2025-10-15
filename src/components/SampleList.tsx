@@ -243,10 +243,8 @@ export const SampleList = React.memo(function SampleList({
 
     // Streaming-style auto-refresh with intelligent polling
     useEffect(() => {
-        // Initial fetch
-        if (isAutoRefresh) {
-            fetchSamples();
-        }
+        // Always perform initial fetch when component mounts
+        fetchSamples();
 
         let interval: number | null = null;
         if (isAutoRefresh) {

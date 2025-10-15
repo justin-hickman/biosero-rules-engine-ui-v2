@@ -481,15 +481,31 @@ function MonitorChainFlowInner({
                     }
                 }
 
+                // Look up rule name from chainContext actions array
+                let displayName = node.label || nodeId;
+                let ruleIdentifier = node.ruleId || nodeId;
+
+                if (!node.actionType && chainContext?.chainStructure?.actions) {
+                    const ruleAction = chainContext.chainStructure.actions.find((a: any) => a.ruleId === nodeId);
+                    if (ruleAction) {
+                        displayName = ruleAction.ruleName;
+                        ruleIdentifier = ruleAction.ruleId;
+                        console.log(`📊 Found rule name for ${nodeId}:`, { ruleName: ruleAction.ruleName, ruleId: ruleAction.ruleId });
+                    } else {
+                        console.log(`⚠️ No rule action found for ${nodeId} in actions array`);
+                    }
+                }
+
                 const nodeData: MonitorNodeData = {
-                    label: node.label || nodeId,
+                    label: displayName,  // Use looked-up name
+                    ruleName: displayName,  // Add ruleName field for MonitorNode component
                     status: node.actionType ? actionStatus : status,
                     duration: undefined, // Duration calculation would need to be done from timestamps
                     errorMessage: executionResult?.errorMessage,
                     isAction: !!node.actionType,
                     actionType: node.actionType,
                     templateName: node.templateName,
-                    ruleId: node.ruleId || nodeId // Add rule ID from BRE data
+                    ruleId: ruleIdentifier  // Use looked-up identifier
                 };
 
                 console.log(`📊 Creating node ${nodeId}:`, {
@@ -571,10 +587,24 @@ function MonitorChainFlowInner({
                 const ruleNodeId = result.ruleName;
                 const status = nodeStatuses[ruleNodeId] || 'pending';
                 
-                // Get rule info from chainContext for proper display names and IDs
-                const ruleInfo = chainContext?.rules?.find((r: any) => r.identifier === result.ruleName);
-                const ruleDisplayName = ruleInfo?.name || result.ruleName;
-                const ruleId = ruleInfo?.identifier || result.ruleName;
+                // Debug: Log what we're working with
+                console.log('Processing rule:', result.ruleName, 'from execution history');
+                console.log('Available chainContext:', {
+                    hasChainStructure: !!chainContext?.chainStructure,
+                    hasActions: !!chainContext?.chainStructure?.actions,
+                    actionsCount: chainContext?.chainStructure?.actions?.length || 0,
+                    allActions: chainContext?.chainStructure?.actions?.map(a => ({ ruleId: a.ruleId, ruleName: a.ruleName })) || []
+                });
+                
+                // Try to find rule name from actions array
+                const ruleAction = chainContext?.chainStructure?.actions?.find((a: any) => a.ruleId === result.ruleName);
+                console.log('Found rule action:', ruleAction);
+                
+                // Use rule name from actions if found, otherwise use a formatted version
+                const ruleDisplayName = ruleAction?.ruleName || `Rule: ${result.ruleName}`;
+                const ruleId = ruleAction?.ruleId || result.ruleName;
+                
+                console.log('Final values:', { ruleDisplayName, ruleId });
                 
                 // Create rule node with BRE data
                 const ruleNode = {
@@ -583,6 +613,7 @@ function MonitorChainFlowInner({
                     position: { x: 200, y: yPos },
                     data: {
                         label: ruleDisplayName, // Rule display name from BRE
+                        ruleName: ruleDisplayName, // Rule display name for MonitorNode component
                         status: status,
                         errorMessage: result.errorMessage,
                         isAction: false,
@@ -679,10 +710,24 @@ function MonitorChainFlowInner({
             
             // Add current rule if not in history
             if (currentRuleName && !executionHistory.find(r => r.ruleName === currentRuleName)) {
-                // Get rule info from chainContext for proper display names and IDs
-                const ruleInfo = chainContext?.rules?.find((r: any) => r.identifier === currentRuleName);
-                const ruleDisplayName = ruleInfo?.name || currentRuleName;
-                const ruleId = ruleInfo?.identifier || currentRuleName;
+                // Debug: Log what we're working with for current rule
+                console.log('Processing current rule:', currentRuleName);
+                console.log('Available chainContext for current rule:', {
+                    hasChainStructure: !!chainContext?.chainStructure,
+                    hasActions: !!chainContext?.chainStructure?.actions,
+                    actionsCount: chainContext?.chainStructure?.actions?.length || 0,
+                    allActions: chainContext?.chainStructure?.actions?.map(a => ({ ruleId: a.ruleId, ruleName: a.ruleName })) || []
+                });
+                
+                // Try to find rule name from actions array
+                const ruleAction = chainContext?.chainStructure?.actions?.find((a: any) => a.ruleId === currentRuleName);
+                console.log('Found current rule action:', ruleAction);
+                
+                // Use rule name from actions if found, otherwise use a formatted version
+                const ruleDisplayName = ruleAction?.ruleName || `Rule: ${currentRuleName}`;
+                const ruleId = ruleAction?.ruleId || currentRuleName;
+                
+                console.log('Final current rule values:', { ruleDisplayName, ruleId });
                 
                 const currentNode = {
                     id: currentRuleName,
@@ -690,6 +735,7 @@ function MonitorChainFlowInner({
                     position: { x: 200, y: yPos },
                     data: {
                         label: ruleDisplayName, // Rule display name from BRE
+                        ruleName: ruleDisplayName, // Rule display name for MonitorNode component
                         status: 'processing' as NodeStatus,
                         isAction: false,
                         ruleId: ruleId, // Rule ID from BRE
