@@ -31,10 +31,9 @@ export interface WorkflowContext {
 
 export enum ContextStatus {
     Active = 0,
-    Running = 1,
-    Complete = 2,
-    Failed = 3,
-    Paused = 4
+    Complete = 1,
+    Failed = 2,
+    Paused = 3
 }
 
 export interface ContextListResponse {
@@ -200,8 +199,7 @@ export class RulesEngineService {
         switch (status) {
             case ContextStatus.Active:
                 return { label: 'Active', color: 'bg-blue-500', icon: 'Circle' };
-            case ContextStatus.Running:
-                return { label: 'Running', color: 'bg-green-500', icon: 'SpinnerGap' };
+            // Running status removed - consolidated into Active
             case ContextStatus.Complete:
                 return { label: 'Complete', color: 'bg-gray-500', icon: 'CheckCircle' };
             case ContextStatus.Failed:
@@ -892,7 +890,7 @@ export class RulesEngineService {
                         status = ContextStatus.Active;
                         break;
                     case 'Running':
-                        status = ContextStatus.Running;
+                        status = ContextStatus.Active;
                         break;
                     case 'Complete':
                     case 'Completed':
@@ -911,7 +909,7 @@ export class RulesEngineService {
                 if (chain.isComplete) {
                             status = ContextStatus.Complete;
                 } else if (chain.isActive) {
-                    status = ContextStatus.Running;
+                    status = ContextStatus.Active;
                         } else {
                             status = ContextStatus.Active;
                         }

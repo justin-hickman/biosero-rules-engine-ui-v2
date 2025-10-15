@@ -48,7 +48,6 @@ export const SampleList = React.memo(function SampleList({
     const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'complete' | 'failed'>('all');
     const [currentPage, setCurrentPage] = useState(1);
     const samplesPerPage = 10;
-    const [visibleSamples, setVisibleSamples] = useState<WorkflowContext[]>([]);
 
     // Debounce search term to prevent excessive filtering
     useEffect(() => {
@@ -165,9 +164,30 @@ export const SampleList = React.memo(function SampleList({
                     const sampleId = chain.variables?.SampleId || chain.variables?.sampleId || 
                                    chain.variables?.OrderId || chain.variables?.orderId || 
                                    `Sample ${chainId.slice(-4)}`;
-                    const status = chain.isComplete ? 
-                        (chain.status === 'Failed' ? 3 : 2) : // Failed or Complete
-                        (chain.isActive ? 1 : 0); // Active or Ready
+                    // Simplified status mapping - use chain.status as primary source
+                    let status = 0; // Default to Active
+                    
+                    // Use the chain.status string as the primary source of truth
+                    switch (chain.status) {
+                        case 'Failed':
+                            status = 2; // Failed
+                            break;
+                        case 'Complete':
+                        case 'Completed':
+                            status = 1; // Complete
+                            break;
+                        case 'Pending':
+                        case 'Running':
+                        default:
+                            // Fallback to boolean flags if status is unknown
+                            if (chain.isComplete) {
+                                status = 1; // Complete
+                            } else if (chain.isActive) {
+                                status = 0; // Active
+                            } else {
+                                status = 0; // Default to Active
+                            }
+                    }
                     
                     // Extract orderId and batchId from top-level fields
                     const orderId = chain.orderId || undefined;
@@ -230,7 +250,10 @@ export const SampleList = React.memo(function SampleList({
             } else {
                 setSamples([]);
             }
-            setError(null);
+            // Only clear error on initial load to prevent re-renders during auto-refresh
+            if (isInitialLoad) {
+                setError(null);
+            }
         } catch (err: any) {
             
             const errorMessage = err.message || 'Failed to fetch samples';
@@ -260,22 +283,12 @@ export const SampleList = React.memo(function SampleList({
         fetchSamplesRef.current = fetchSamples;
     }, [fetchSamples]);
 
-    // Streaming-style auto-refresh with intelligent polling
+    // Initial load only
     useEffect(() => {
-        // Only fetch on mount or when auto-refresh toggles
         if (isInitialLoad) {
-        fetchSamples();
-            setIsInitialLoad(false);
+            fetchSamples();
         }
-
-        // Remove global polling to prevent flashing
-        // Only poll selected sample in SampleMonitor for real-time canvas updates
-        // Users can manually refresh the sample list when needed
-
-        return () => {
-            // No cleanup needed since we removed global polling
-        };
-    }, []); // No dependencies needed since we removed global polling
+    }, [fetchSamples, isInitialLoad]);
 
     // Group samples by status with proper filtering and stable references
     const groupedSamples = useMemo(() => {
@@ -293,7 +306,7 @@ export const SampleList = React.memo(function SampleList({
 
             // Status filter
         if (filterStatusRef.current !== 'all') {
-                if (filterStatusRef.current === 'active' && sample.status !== ContextStatus.Active && sample.status !== ContextStatus.Running) {
+                if (filterStatusRef.current === 'active' && sample.status !== ContextStatus.Active) {
                     return false;
                 }
                 if (filterStatusRef.current === 'complete' && sample.status !== ContextStatus.Complete) {
@@ -350,7 +363,7 @@ export const SampleList = React.memo(function SampleList({
         } else {
             // Group by status (default 'sample' behavior)
             grouped = {
-                active: filtered.filter(s => s.status === ContextStatus.Active || s.status === ContextStatus.Running),
+                active: filtered.filter(s => s.status === ContextStatus.Active),
                 complete: filtered.filter(s => s.status === ContextStatus.Complete),
                 failed: filtered.filter(s => s.status === ContextStatus.Failed)
             };
@@ -392,35 +405,20 @@ export const SampleList = React.memo(function SampleList({
 
     const totalPages = Math.ceil(totalSamples / samplesPerPage);
 
-    // Track visible samples for targeted polling
-    useEffect(() => {
-        const visible = Object.values(paginatedSamples).flat();
-        setVisibleSamples(visible);
-    }, [paginatedSamples]);
-
-    // Poll only visible active/running samples
+    // Poll only when auto-refresh is enabled - no dependency on visible samples to prevent flashing
     useEffect(() => {
         if (!isAutoRefresh) return;
 
-        const activeVisibleSamples = visibleSamples.filter(sample => 
-            sample.status === ContextStatus.Active || sample.status === ContextStatus.Running
-        );
-
-        if (activeVisibleSamples.length === 0) return;
-
         const interval = setInterval(async () => {
-            // Only fetch if we have active samples visible
-            if (activeVisibleSamples.length > 0) {
-                try {
-                    await fetchSamplesRef.current?.();
-                } catch (error) {
-                    console.error('Polling error for visible samples:', error);
-                }
+            try {
+                await fetchSamplesRef.current?.();
+            } catch (error) {
+                console.error('Polling error:', error);
             }
-        }, 2000); // Poll every 2 seconds for visible active samples
+        }, 5000); // Poll every 5 seconds to minimize flashing
 
         return () => clearInterval(interval);
-    }, [visibleSamples, isAutoRefresh]); // Removed fetchSamples to fix infinite loop
+    }, [isAutoRefresh]); // Only depend on isAutoRefresh to prevent dependency loops
 
     // Toggle group expansion
     const toggleGroup = useCallback((group: string) => {
@@ -450,8 +448,6 @@ export const SampleList = React.memo(function SampleList({
             <XCircle className="w-4 h-4 text-red-500" />
         ) : sample.status === ContextStatus.Active ? (
             <Clock className="w-4 h-4 text-blue-500" />
-        ) : sample.status === ContextStatus.Running ? (
-            <Loader2 className="w-4 h-4 text-orange-500 animate-spin" />
         ) : (
             <Clock className="w-4 h-4 text-gray-500" />
         );
@@ -492,12 +488,12 @@ export const SampleList = React.memo(function SampleList({
                         </Badge>
                         <div className="text-xs text-muted-foreground flex items-center gap-1">
                             <span>
-                                {sample.status === ContextStatus.Active || sample.status === ContextStatus.Running ? 
+                                {sample.status === ContextStatus.Active ? 
                                     rulesEngineService.formatDuration(sample.createdAt, new Date().toISOString()) :
                                     rulesEngineService.formatDuration(sample.createdAt, sample.lastUpdatedAt)
                                 }
                             </span>
-                            {autoRefresh && (sample.status === ContextStatus.Active || sample.status === ContextStatus.Running) && (
+                            {autoRefresh && sample.status === ContextStatus.Active && (
                                 <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" title="Live updates enabled" />
                             )}
                         </div>
@@ -507,19 +503,69 @@ export const SampleList = React.memo(function SampleList({
         );
     });
 
-    // Render sample card using memoized component
+    // Render sample card with stable key and memoization - simplified
     const renderSampleCard = useCallback((sample: WorkflowContext, autoRefresh: boolean) => {
         const isSelected = selectedSampleId === sample.sampleId;
         
+        // Better status icons
+        const statusIcon = sample.status === ContextStatus.Complete ? (
+            <CheckCircle className="w-4 h-4 text-green-500" />
+        ) : sample.status === ContextStatus.Failed ? (
+            <XCircle className="w-4 h-4 text-red-500" />
+        ) : sample.status === ContextStatus.Active ? (
+            <Clock className="w-4 h-4 text-blue-500" />
+        ) : (
+            <Clock className="w-4 h-4 text-gray-500" />
+        );
+
+        // Create a stable key that won't change unless the sample actually changes
+        const stableKey = `${sample.sampleId}-${sample.status}-${sample.chainId || 'no-chain'}`;
+        
         return (
-            <SampleCard
-                key={`${sample.sampleId}-${sample.status}`}
-                sample={sample}
-                autoRefresh={autoRefresh}
-                isSelected={isSelected}
-                onSelect={onSampleSelect}
-                rulesEngineService={rulesEngineService}
-            />
+            <Card
+                key={stableKey}
+                className={cn(
+                    "p-3 cursor-pointer transition-all duration-200 hover:shadow-md mb-2",
+                    isSelected ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-800"
+                )}
+                onClick={() => onSampleSelect(sample)}
+            >
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        {statusIcon}
+                        <div>
+                            <div className="font-medium text-sm">{sample.sampleId}</div>
+                            {sample.orderId && (
+                                <div className="text-xs text-muted-foreground">Order: {sample.orderId}</div>
+                            )}
+                            {sample.batchId && (
+                                <div className="text-xs text-muted-foreground">Batch: {sample.batchId}</div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Badge variant={
+                            sample.status === ContextStatus.Complete ? "default" :
+                            sample.status === ContextStatus.Failed ? "destructive" :
+                            sample.status === ContextStatus.Active ? "secondary" :
+                            "outline"
+                        }>
+                            {ContextStatus[sample.status]}
+                        </Badge>
+                        <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <span>
+                                {sample.status === ContextStatus.Active ? 
+                                    rulesEngineService.formatDuration(sample.createdAt, new Date().toISOString()) :
+                                    rulesEngineService.formatDuration(sample.createdAt, sample.lastUpdatedAt)
+                                }
+                            </span>
+                            {autoRefresh && sample.status === ContextStatus.Active && (
+                                <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" title="Live updates enabled" />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </Card>
         );
     }, [selectedSampleId, onSampleSelect, rulesEngineService]);
 
@@ -564,7 +610,7 @@ export const SampleList = React.memo(function SampleList({
                                 "gap-2",
                                 isAutoRefresh && "text-primary"
                             )}
-                            title={isAutoRefresh ? "Auto-refresh enabled (canvas only)" : "Auto-refresh disabled (canvas only)"}
+                            title={isAutoRefresh ? "Auto-refresh enabled (canvas: 1s, sample list: 5s)" : "Auto-refresh disabled"}
                         >
                             <Loader2 className={cn("w-4 h-4", isAutoRefresh && "animate-pulse")} />
                             {isAutoRefresh ? "Auto-refresh ON" : "Auto-refresh OFF"}

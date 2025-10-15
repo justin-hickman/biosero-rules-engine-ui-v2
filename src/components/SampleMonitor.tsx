@@ -498,11 +498,16 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     }, [rulesEngineService, buildFullChain, buildChainDataFromPayload]);
 
 
-    // Handle sample selection
+    // Handle sample selection - use ref to avoid dependency on fetchChainExecution
+    const fetchChainExecutionRef = useRef(fetchChainExecution);
+    useEffect(() => {
+        fetchChainExecutionRef.current = fetchChainExecution;
+    }, [fetchChainExecution]);
+
     const handleSampleSelect = useCallback(async (context: WorkflowContext) => {
         setSelectedContext(context);
-        await fetchChainExecution(context);
-    }, [fetchChainExecution]);
+        await fetchChainExecutionRef.current(context);
+    }, []); // No dependencies to prevent re-creation
 
     // Handle node click in the chain visualization - show execution details instead of navigating
     const handleNodeClick = useCallback(async (nodeId: string) => {
