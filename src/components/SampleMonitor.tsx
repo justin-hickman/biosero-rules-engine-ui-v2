@@ -99,10 +99,6 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     const buildFullChain = useCallback(async (startingRuleId: string, chainContext: any) => {
         try {
             // Building full chain from enriched payload data
-                rules: chainContext.rules?.length || 0,
-                ruleNames: chainContext.rules?.map(r => r.identifier) || [],
-                edgeDetails: chainContext.chainStructure?.edges || []
-            });
             
             const nodes: Record<string, any> = {};
             const edges: Array<{ from: string; to: string; type: 'success' | 'failure' | 'connection'; label?: string }> = [];
