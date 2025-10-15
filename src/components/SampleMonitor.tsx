@@ -41,7 +41,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     const [dynamicChainData, setDynamicChainData] = useState<ChainData | null>(null);
     const [isLoadingChain, setIsLoadingChain] = useState(false);
     const [isInitialChainLoad, setIsInitialChainLoad] = useState(true);
-    const [pollingInterval, setPollingInterval] = useState<number | null>(null);
+    const pollingIntervalRef = useRef<number | null>(null);
     const lastChainUpdate = React.useRef<number>(0);
     const [selectedNodeDetails, setSelectedNodeDetails] = useState<{
         nodeId: string;
@@ -71,20 +71,17 @@ export const SampleMonitor = React.memo(function SampleMonitor({
         setCurrentAutoRefresh(isAutoRefresh);
     }, [isAutoRefresh]);
     
-    // Memoize chain data to prevent unnecessary re-renders with deep comparison
+    // Memoize chain data to prevent unnecessary re-renders with optimized comparison
     const stableChainData = React.useMemo(() => {
         const currentData = dynamicChainData || fullChainData || chainData;
         
         // Create a stable reference that only changes when the actual content changes
         if (!currentData) return null;
         
-        // Create a deep comparison key to prevent unnecessary updates
-        const dataKey = JSON.stringify({
-            nodeCount: Object.keys(currentData.nodes || {}).length,
-            edgeCount: (currentData.edges || []).length,
-            nodeIds: Object.keys(currentData.nodes || {}).sort(),
-            edgeKeys: (currentData.edges || []).map(e => `${e.from}-${e.to}-${e.type}`).sort()
-        });
+        // Use simple hash instead of expensive JSON.stringify
+        const nodeCount = Object.keys(currentData.nodes || {}).length;
+        const edgeCount = (currentData.edges || []).length;
+        const dataKey = `${nodeCount}-${edgeCount}`;
         
         // Return the current data with a stable key
         return {
@@ -101,10 +98,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     // Build full chain from enriched payload data (much more efficient!)
     const buildFullChain = useCallback(async (startingRuleId: string, chainContext: any) => {
         try {
-            console.log('🔍 Monitor: Building full chain from enriched payload data:', startingRuleId);
-            console.log('🔍 Monitor: Chain structure from payload:', {
-                edges: chainContext.chainStructure?.edges || [],
-                actions: chainContext.chainStructure?.actions || [],
+            // Building full chain from enriched payload data
                 rules: chainContext.rules?.length || 0,
                 ruleNames: chainContext.rules?.map(r => r.identifier) || [],
                 edgeDetails: chainContext.chainStructure?.edges || []
@@ -186,7 +180,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                         },
                         animated: animated
                     });
-                    console.log(`🔗 Monitor: Added edge ${edge.from} -> ${edge.to} (${edge.type}) with color ${edgeColor}, animated: ${animated}`);
+                    // Added edge
                 });
             }
             
@@ -225,7 +219,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                         },
                         animated: animated
                     });
-                    console.log(`🔗 Monitor: Added action ${action.ruleName} -> ${actionId}`);
+                    // Added action
                 });
             }
             
@@ -726,9 +720,9 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     // Set up polling for active samples with optimized change detection
     useEffect(() => {
         // Clear existing interval
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-            setPollingInterval(null);
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
         }
 
         if (!selectedContext || !chainExecution) return;
@@ -737,20 +731,19 @@ export const SampleMonitor = React.memo(function SampleMonitor({
         const shouldPoll = currentAutoRefresh && !!selectedContext && !!chainExecution;
 
         if (shouldPoll) {
-            const interval = setInterval(async () => {
+            pollingIntervalRef.current = setInterval(async () => {
                 try {
                     await fetchChainExecution(selectedContext);
                 } catch (error) {
                     console.error('Polling error:', error);
                 }
             }, 1000); // Poll every 1 second for real-time canvas updates (only for selected sample)
-
-            setPollingInterval(interval);
         }
 
         return () => {
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
             }
         };
     }, [selectedContext, currentAutoRefresh, fetchChainExecution]);

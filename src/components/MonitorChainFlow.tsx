@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     ReactFlow,
     Node,
@@ -372,14 +372,27 @@ function MonitorChainFlowInner({
 }: MonitorChainFlowProps) {
     // Force re-render every second while chain is active
     const [, setForceUpdate] = useState(0);
+    const forceUpdateTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
+        // Clear existing timer
+        if (forceUpdateTimerRef.current) {
+            clearInterval(forceUpdateTimerRef.current);
+            forceUpdateTimerRef.current = null;
+        }
+        
         if (chainContext?.isActive && !chainContext?.isComplete) {
-            const timer = setInterval(() => {
+            forceUpdateTimerRef.current = setInterval(() => {
                 setForceUpdate(v => v + 1);
             }, 1000); // Update every 1 second for real-time animations (only for selected sample)
-            return () => clearInterval(timer);
         }
+        
+        return () => {
+            if (forceUpdateTimerRef.current) {
+                clearInterval(forceUpdateTimerRef.current);
+                forceUpdateTimerRef.current = null;
+            }
+        };
     }, [chainContext?.isActive, chainContext?.isComplete]);
     // Calculate nodes and edges from chain data or execution history
     const { nodes, edges } = useMemo(() => {
