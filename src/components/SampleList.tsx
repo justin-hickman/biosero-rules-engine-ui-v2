@@ -367,6 +367,7 @@ export const SampleList = React.memo(function SampleList({
                 total: samples.length,
                 filtered: filtered.length,
                 groupingType: groupingTypeRef.current,
+                sampleDetails: filtered.map(s => ({ sampleId: s.sampleId, orderId: s.orderId, batchId: s.batchId })),
                 groups: Object.keys(grouped).reduce((acc, key) => {
                     acc[key] = grouped[key].length;
                     return acc;

@@ -751,7 +751,7 @@ export class RulesEngineService {
                 });
                 
                 // Extract sample ID - NEW DTO has sampleId at top level
-                if (chain.sampleId) {
+                if (chain.sampleId !== null && chain.sampleId !== undefined) {
                     sampleId = chain.sampleId;
                 } else {
                     // Fallback to variables extraction if top-level sampleId is null
@@ -788,14 +788,14 @@ export class RulesEngineService {
                 }
                 
                 // Extract batchId - NEW DTO has batchId at top level
-                if (chain.batchId) {
+                if (chain.batchId !== null && chain.batchId !== undefined) {
                     batchId = chain.batchId;
                 } else if (chain.variables?.batchId) {
                     batchId = chain.variables.batchId;
                 }
                 
                 // Extract orderId - NEW DTO has orderId at top level
-                if (chain.orderId) {
+                if (chain.orderId !== null && chain.orderId !== undefined) {
                     orderId = chain.orderId;
                 } else if (chain.variables?.orderId) {
                     orderId = chain.variables.orderId;
@@ -895,9 +895,9 @@ export class RulesEngineService {
                 
                 return {
                     contextId: contextId || chain.chainId,
-                    orderId: orderId || undefined,
-                    batchId: batchId || undefined,
-                    sampleId: sampleId || undefined,
+                    orderId: orderId,
+                    batchId: batchId,
+                    sampleId: sampleId,
                     status: status,
                     createdAt: chain.startTimestamp,
                     lastUpdatedAt: chain.endTimestamp || chain.startTimestamp, // Use endTimestamp for lastUpdatedAt
