@@ -1198,6 +1198,47 @@ const setDeepValue = (obj: any, path: (string | number)[], value: any): any => {
 // Data Transformation Utilities
 // ==========================================================================
 
+// Extract variables from lambda expression
+export const extractVariablesFromExpression = (expression: string): string[] => {
+    if (!expression || typeof expression !== 'string') return [];
+    
+    // Common patterns for lambda expressions
+    // Look for variable patterns like: x => x.property, (x, y) => x + y, etc.
+    const variablePatterns = [
+        // Lambda parameters: x =>, (x, y) =>, (x, y, z) =>
+        /(?:^|\s)\(?([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*,\s*([a-zA-Z_$][a-zA-Z0-9_$]*))*\)?\s*=>/g,
+        // Property access patterns: x.property, y.value
+        /([a-zA-Z_$][a-zA-Z0-9_$]*)\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g,
+        // Simple variable references: x, y, z (but not keywords)
+        /(?:^|\s)([a-zA-Z_$][a-zA-Z0-9_$]*)(?=\s|$|[^a-zA-Z0-9_$])/g
+    ];
+    
+    const variables = new Set<string>();
+    
+    variablePatterns.forEach(pattern => {
+        let match;
+        while ((match = pattern.exec(expression)) !== null) {
+            // Extract all captured groups
+            for (let i = 1; i < match.length; i++) {
+                if (match[i] && match[i].trim()) {
+                    variables.add(match[i].trim());
+                }
+            }
+        }
+    });
+    
+    // Filter out common keywords and system variables
+    const excludeKeywords = new Set([
+        'true', 'false', 'null', 'undefined', 'this', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default', 'break', 'continue', 'function', 'var', 'let', 'const', 'typeof', 'instanceof', 'new', 'delete', 'void', 'in', 'of', 'try', 'catch', 'finally', 'throw'
+    ]);
+    
+    return Array.from(variables).filter(v => 
+        !excludeKeywords.has(v.toLowerCase()) && 
+        v.length > 0 &&
+        !v.match(/^\d/) // Don't include variables starting with numbers
+    );
+};
+
 export const parseRuleFromApi = (apiRule: any, existingRuleId?: string): Rule => {
     const uiRule = structuredClone(DEFAULT_RULE_TEMPLATE);
     uiRule.id = apiRule?.identifier || apiRule?.id || existingRuleId || null;
@@ -2014,6 +2055,11 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
     const [isLoadingDetails, setIsLoadingDetails] = React.useState(false);
     const [detailsError, setDetailsError] = React.useState<string>("");
     const [selectedTemplateDetails, setSelectedTemplateDetails] = React.useState<any>(null);
+    
+    // Target rule variables state
+    const [targetRuleVariables, setTargetRuleVariables] = React.useState<string[]>([]);
+    const [isLoadingTargetRule, setIsLoadingTargetRule] = React.useState(false);
+    const [targetRuleError, setTargetRuleError] = React.useState<string>("");
 
     // Fetch template list when modal opens AND action is template-driven
     React.useEffect(() => {
@@ -2104,6 +2150,51 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
             outputParameters: newOutput,
         });
     }, [isTemplateDriven, selectedTemplateDetails]); // Removed editingNodeData and setEditingNodeData from deps to avoid loops
+
+    // Fetch target rule variables when target rule ID changes
+    React.useEffect(() => {
+        if (!editingNodeData?.targetRuleId || !dataServicesRootURI) {
+            setTargetRuleVariables([]);
+            setTargetRuleError("");
+            return;
+        }
+        
+        let cancelled = false;
+        
+        (async () => {
+            setIsLoadingTargetRule(true);
+            setTargetRuleError("");
+            try {
+                const ruleDetails = await apiFetchRuleDetails(dataServicesRootURI, editingNodeData.targetRuleId);
+                if (!cancelled && ruleDetails) {
+                    // Extract expression from rule details
+                    const exprProp = ruleDetails.properties?.find((p: any) => 
+                        p?.name === "Expression" || p?.name === "Evaluation Lambda Expression"
+                    );
+                    const expression = exprProp?.value || "";
+                    
+                    // Extract variables from expression
+                    const variables = extractVariablesFromExpression(expression);
+                    setTargetRuleVariables(variables);
+                    
+                    // Auto-populate default mappings if none exist
+                    if (variables.length > 0 && (!editingNodeData?.variableMappings || editingNodeData.variableMappings.length === 0)) {
+                        const defaultMappings = variables.map(variable => ({ from: '', to: variable }));
+                        setEditingNodeData({
+                            ...editingNodeData,
+                            variableMappings: defaultMappings
+                        });
+                    }
+                }
+            } catch (e: any) {
+                if (!cancelled) setTargetRuleError(`Failed to fetch target rule: ${e.message || e}`);
+            } finally {
+                if (!cancelled) setIsLoadingTargetRule(false);
+            }
+        })();
+        
+        return () => { cancelled = true; };
+    }, [editingNodeData?.targetRuleId, dataServicesRootURI]);
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -2309,16 +2400,18 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-2">Target Rule ID</label>
-                                        <Input
-                                            value={editingNodeData?.targetRuleId || ''}
-                                            onChange={(e) => setEditingNodeData({ 
-                                                ...editingNodeData, 
-                                                targetRuleId: e.target.value 
+                                        <SimpleRuleSelector
+                                            dataServicesRootURI={dataServicesRootURI || ""}
+                                            onRuleSelect={(ruleId) => setEditingNodeData({
+                                                ...editingNodeData,
+                                                targetRuleId: ruleId
                                             })}
-                                            placeholder="Enter target rule ID"
+                                            value={editingNodeData?.targetRuleId || ''}
+                                            placeholder="-- Select target rule --"
+                                            disabled={false}
                                         />
                                     </div>
-                                    <div>
+                                    <div style={{ display: 'none' }}>
                                         <label className="block text-sm font-medium mb-2">Topic</label>
                                         <Input
                                             value={editingNodeData?.topic || ''}
@@ -2328,6 +2421,106 @@ const EditActionNodeDialog: React.FC<EditActionNodeDialogProps> = ({
                                             })}
                                             placeholder="Enter topic"
                                         />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">Variable Mappings</label>
+                                        <div className="text-xs text-muted-foreground mb-2">
+                                            Map variables from current context to target rule variables
+                                        </div>
+
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-xs text-muted-foreground">
+                                                Define how variables are passed to the target rule
+                                            </span>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                    const currentMappings = Array.isArray(editingNodeData?.variableMappings) 
+                                                        ? editingNodeData.variableMappings 
+                                                        : [];
+                                                    setEditingNodeData({
+                                                        ...editingNodeData,
+                                                        variableMappings: [...currentMappings, { from: '', to: '' }]
+                                                    });
+                                                }}
+                                            >
+                                                + Add Mapping
+                                            </Button>
+                                        </div>
+
+                                        <div className="space-y-2 max-h-60 overflow-y-auto border rounded-md p-2">
+                                            {(Array.isArray(editingNodeData?.variableMappings) ? editingNodeData.variableMappings : []).map((mapping: any, index: number) => (
+                                                <div key={index} className="flex items-center gap-2 p-2 border rounded-md bg-muted/30">
+                                                    <div className="flex-1">
+                                                        <label className="text-xs text-muted-foreground">Source Variable</label>
+                                                        <Input
+                                                            value={mapping.from || ''}
+                                                            onChange={(e) => {
+                                                                const newMappings = [...(Array.isArray(editingNodeData?.variableMappings) ? editingNodeData.variableMappings : [])];
+                                                                newMappings[index] = { ...mapping, from: e.target.value };
+                                                                setEditingNodeData({
+                                                                    ...editingNodeData,
+                                                                    variableMappings: newMappings
+                                                                });
+                                                            }}
+                                                            placeholder="e.g., currentValue"
+                                                            className="text-sm"
+                                                        />
+                                                    </div>
+                                                <div className="flex-1">
+                                                    <label className="text-xs text-muted-foreground">Target Variable</label>
+                                                    {isLoadingTargetRule && <p className="text-xs text-muted-foreground italic">Loading target rule variables...</p>}
+                                                    {targetRuleError && <p className="text-xs text-destructive">{targetRuleError}</p>}
+                                                    <Select
+                                                        value={mapping.to || ''}
+                                                        onValueChange={(value) => {
+                                                            const newMappings = [...(Array.isArray(editingNodeData?.variableMappings) ? editingNodeData.variableMappings : [])];
+                                                            newMappings[index] = { ...mapping, to: value };
+                                                            setEditingNodeData({
+                                                                ...editingNodeData,
+                                                                variableMappings: newMappings
+                                                            });
+                                                        }}
+                                                        disabled={isLoadingTargetRule || targetRuleVariables.length === 0}
+                                                    >
+                                                        <SelectTrigger className="text-sm">
+                                                            <SelectValue placeholder={targetRuleVariables.length === 0 ? "No target rule selected" : "Select target variable"} />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {targetRuleVariables.map((variable) => (
+                                                                <SelectItem key={variable} value={variable}>
+                                                                    {variable}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            const newMappings = (Array.isArray(editingNodeData?.variableMappings) ? editingNodeData.variableMappings : []).filter((_: any, i: number) => i !== index);
+                                                            setEditingNodeData({
+                                                                ...editingNodeData,
+                                                                variableMappings: newMappings
+                                                            });
+                                                        }}
+                                                        className="text-red-600 hover:text-red-700 mt-5"
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                            
+                                            {(!Array.isArray(editingNodeData?.variableMappings) || editingNodeData.variableMappings.length === 0) && (
+                                                <div className="text-center py-4 text-muted-foreground text-sm">
+                                                    No variable mappings defined. Click "Add Mapping" to create one.
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </>
                             )}
@@ -3630,6 +3823,11 @@ const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, dataServi
     const [isLoadingDetails, setIsLoadingDetails] = React.useState(false);
     const [errorTemplates, setErrorTemplates] = React.useState('');
     const [errorDetails, setErrorDetails] = React.useState('');
+    
+    // Target rule variables state
+    const [targetRuleVariables, setTargetRuleVariables] = React.useState<string[]>([]);
+    const [isLoadingTargetRule, setIsLoadingTargetRule] = React.useState(false);
+    const [targetRuleError, setTargetRuleError] = React.useState<string>("");
 
     const stableOnChange = React.useCallback(onChange, []);
 
@@ -3728,6 +3926,51 @@ const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, dataServi
         }
     }, [selectedTemplateDetails, isTemplateDriven, stableOnChange, currentAction]);
 
+    // Fetch target rule variables when target rule ID changes
+    React.useEffect(() => {
+        if (!(currentAction as any).TargetRuleId || !dataServicesRootURI) {
+            setTargetRuleVariables([]);
+            setTargetRuleError("");
+            return;
+        }
+        
+        let cancelled = false;
+        
+        (async () => {
+            setIsLoadingTargetRule(true);
+            setTargetRuleError("");
+            try {
+                const ruleDetails = await apiFetchRuleDetails(dataServicesRootURI, (currentAction as any).TargetRuleId);
+                if (!cancelled && ruleDetails) {
+                    // Extract expression from rule details
+                    const exprProp = ruleDetails.properties?.find((p: any) => 
+                        p?.name === "Expression" || p?.name === "Evaluation Lambda Expression"
+                    );
+                    const expression = exprProp?.value || "";
+                    
+                    // Extract variables from expression
+                    const variables = extractVariablesFromExpression(expression);
+                    setTargetRuleVariables(variables);
+                    
+                    // Auto-populate default mappings if none exist
+                    if (variables.length > 0 && (!(currentAction as any).VariableMappings || (currentAction as any).VariableMappings.length === 0)) {
+                        const defaultMappings = variables.map(variable => ({ from: '', to: variable }));
+                        stableOnChange({
+                            ...currentAction,
+                            VariableMappings: defaultMappings
+                        } as Action);
+                    }
+                }
+            } catch (e: any) {
+                if (!cancelled) setTargetRuleError(`Failed to fetch target rule: ${e.message || e}`);
+            } finally {
+                if (!cancelled) setIsLoadingTargetRule(false);
+            }
+        })();
+        
+        return () => { cancelled = true; };
+    }, [(currentAction as any).TargetRuleId, dataServicesRootURI]);
+
     const handleActionTypeChange = (value: string) => {
         if (value === "none") {
             stableOnChange({ _uid, ActionType: "" } as Action);
@@ -3774,6 +4017,11 @@ const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, dataServi
     };
 
     const getGenericFields = (): string[] => {
+        // Don't show generic fields for Rule Evaluation actions since they have dedicated UI
+        if (currentActionType === 'RuleEvaluationAction') {
+            return [];
+        }
+        
         return Object.keys(currentAction).filter(key => 
             !OMITTED_ACTION_FIELDS.has(key) && 
             key !== '_uid' && 
@@ -3876,7 +4124,140 @@ const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, dataServi
                 </>
             )}
 
-            {/* Rule Evaluation Action specific config would go here */}
+            {/* Rule Evaluation Action specific config */}
+            {supported && currentActionType === "RuleEvaluationAction" && (
+                <>
+                    <div className="space-y-1 mt-2">
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Evaluation Type</label>
+                        <Select 
+                            value={(currentAction as any).EvaluationType || '__none__'} 
+                            onValueChange={(value) => handleFieldChange('EvaluationType', value === '__none__' ? '' : value)}
+                        >
+                            <SelectTrigger className="text-sm">
+                                <SelectValue placeholder="Select Evaluation Type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__none__">-- Select Evaluation Type --</SelectItem>
+                                <SelectItem value="Single">Single</SelectItem>
+                                <SelectItem value="Competitive">Competitive</SelectItem>
+                                <SelectItem value="Parallel">Parallel</SelectItem>
+                                <SelectItem value="Hierarchical">Hierarchical</SelectItem>
+                                <SelectItem value="Composite">Composite</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    
+                    <div className="space-y-1 mt-2">
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Target Rule ID</label>
+                        <SimpleRuleSelector
+                            dataServicesRootURI={dataServicesRootURI || ""}
+                            onRuleSelect={(ruleId) => handleFieldChange('TargetRuleId', ruleId)}
+                            value={(currentAction as any).TargetRuleId || ''}
+                            placeholder="-- Select target rule --"
+                            disabled={false}
+                        />
+                    </div>
+                    
+                    <div className="space-y-1 mt-2" style={{ display: 'none' }}>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Topic</label>
+                        <Input
+                            value={(currentAction as any).Topic || ''}
+                            onChange={(e) => handleFieldChange('Topic', e.target.value)}
+                            placeholder="Enter topic"
+                            className="text-sm"
+                        />
+                    </div>
+                    
+                    <div className="space-y-1 mt-2">
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Variable Mappings</label>
+                        <div className="text-xs text-muted-foreground mb-2">
+                            Map variables from current context to target rule variables
+                        </div>
+
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs text-muted-foreground">
+                                Define how variables are passed to the target rule
+                            </span>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    const currentMappings = Array.isArray((currentAction as any).VariableMappings) 
+                                        ? (currentAction as any).VariableMappings 
+                                        : [];
+                                    handleFieldChange('VariableMappings', [...currentMappings, { from: '', to: '' }]);
+                                }}
+                            >
+                                + Add Mapping
+                            </Button>
+                        </div>
+
+                        <div className="space-y-2 max-h-60 overflow-y-auto border rounded-md p-2">
+                            {(Array.isArray((currentAction as any).VariableMappings) ? (currentAction as any).VariableMappings : []).map((mapping: any, index: number) => (
+                                <div key={index} className="flex items-center gap-2 p-2 border rounded-md bg-muted/30">
+                                    <div className="flex-1">
+                                        <label className="text-xs text-muted-foreground">Source Variable</label>
+                                        <Input
+                                            value={mapping.from || ''}
+                                            onChange={(e) => {
+                                                const newMappings = [...(Array.isArray((currentAction as any).VariableMappings) ? (currentAction as any).VariableMappings : [])];
+                                                newMappings[index] = { ...mapping, from: e.target.value };
+                                                handleFieldChange('VariableMappings', newMappings);
+                                            }}
+                                            placeholder="e.g., currentValue"
+                                            className="text-sm"
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="text-xs text-muted-foreground">Target Variable</label>
+                                        {isLoadingTargetRule && <p className="text-xs text-muted-foreground italic">Loading target rule variables...</p>}
+                                        {targetRuleError && <p className="text-xs text-destructive">{targetRuleError}</p>}
+                                        <Select
+                                            value={mapping.to || ''}
+                                            onValueChange={(value) => {
+                                                const newMappings = [...(Array.isArray((currentAction as any).VariableMappings) ? (currentAction as any).VariableMappings : [])];
+                                                newMappings[index] = { ...mapping, to: value };
+                                                handleFieldChange('VariableMappings', newMappings);
+                                            }}
+                                            disabled={isLoadingTargetRule || targetRuleVariables.length === 0}
+                                        >
+                                            <SelectTrigger className="text-sm">
+                                                <SelectValue placeholder={targetRuleVariables.length === 0 ? "No target rule selected" : "Select target variable"} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {targetRuleVariables.map((variable) => (
+                                                    <SelectItem key={variable} value={variable}>
+                                                        {variable}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            const newMappings = (Array.isArray((currentAction as any).VariableMappings) ? (currentAction as any).VariableMappings : []).filter((_: any, i: number) => i !== index);
+                                            handleFieldChange('VariableMappings', newMappings);
+                                        }}
+                                        className="text-red-600 hover:text-red-700 mt-5"
+                                    >
+                                        Remove
+                                    </Button>
+                                </div>
+                            ))}
+                            
+                            {(!Array.isArray((currentAction as any).VariableMappings) || (currentAction as any).VariableMappings.length === 0) && (
+                                <div className="text-center py-4 text-muted-foreground text-sm">
+                                    No variable mappings defined. Click "Add Mapping" to create one.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </>
+            )}
             
             {/* Generic fields for other actions */}
             {supported && currentActionType !== "none" && getGenericFields().length > 0 && (
@@ -4340,7 +4721,14 @@ function App() {
                     action.Topic = targetNode.topic || "";
                     action.RuleAction = "use";
                     action.TargetRuleId = targetNode.targetRuleId || "";
-                    action.VariableMappings = targetNode.variableMappings || {};
+                    // Convert array format to object format for backend if needed
+                    const mappings = Array.isArray(targetNode.variableMappings) 
+                        ? targetNode.variableMappings.reduce((acc, m) => {
+                              if (m.from && m.to) acc[m.from] = m.to;
+                              return acc;
+                          }, {} as Record<string, string>)
+                        : targetNode.variableMappings || {};
+                    action.VariableMappings = mappings;
                 }
                 
                 // Add to appropriate array based on edge type
@@ -4813,6 +5201,64 @@ function App() {
             edges: cleanedEdges
         };
     }, []);
+
+    // Merge new chain data with existing chain data
+    const handleMergeChain = React.useCallback(async (startRuleId: string, forceFreshData: boolean = false) => {
+        if (!startRuleId) {
+            toast.error("Please specify a start rule ID");
+            return;
+        }
+
+        if (!dataServicesRootURI) {
+            toast.error("Data Services URL is required to generate chain map");
+            return;
+        }
+
+        console.log('Merging recursive chain for rule:', startRuleId);
+        setIsLoading(prev => ({ ...prev, chainData: true }));
+        setChainError('');
+
+        try {
+            // Use fresh data from backend if forceFreshData is true, otherwise use jsonData
+            const currentRule = forceFreshData ? undefined : (jsonData || undefined);
+            const newGraph = await buildRuleChainRecursively(startRuleId, dataServicesRootURI, currentRule, forceFreshData);
+            console.log('Generated new chain with', Object.keys(newGraph.nodes).length, 'nodes and', newGraph.edges.length, 'edges');
+            
+            // Clean up the new chain data
+            const cleanedNewGraph = cleanupChainData(newGraph);
+            console.log('Cleaned new chain data:', Object.keys(cleanedNewGraph.nodes).length, 'nodes and', cleanedNewGraph.edges.length, 'edges');
+            
+            // Merge with existing chain data
+            const existingChainData = ruleChainData;
+            const mergedNodes = {
+                ...existingChainData?.nodes || {},
+                ...cleanedNewGraph.nodes
+            };
+            
+            const mergedEdges = [
+                ...(existingChainData?.edges || []),
+                ...cleanedNewGraph.edges
+            ];
+            
+            const mergedChainData = {
+                nodes: mergedNodes,
+                edges: mergedEdges
+            };
+            
+            console.log('Merged chain data:', Object.keys(mergedChainData.nodes).length, 'nodes and', mergedChainData.edges.length, 'edges');
+            
+            setRuleChainData(mergedChainData);
+            setShouldAutoArrange(true); // Trigger auto-arrange for new rule selection
+            setHasUnsavedChainChanges(false);
+            toast.success(`Added rule chain: ${Object.keys(cleanedNewGraph.nodes).length} new rules merged with existing chain`);
+        } catch (error: any) {
+            console.error('Error merging chain:', error);
+            setChainError(`Failed to merge chain: ${error.message || 'Unknown error'}`);
+            toast.error(`Failed to merge chain: ${error.message || 'Unknown error'}`);
+        } finally {
+            setIsLoading(prev => ({ ...prev, chainData: false }));
+        }
+    }, [dataServicesRootURI, jsonData, ruleChainData]);
 
     const handleGenerateChain = React.useCallback(async (startRuleId: string, forceFreshData: boolean = false) => {
         if (!startRuleId) {
@@ -5903,6 +6349,7 @@ HTTP 200 OK with JSON like {"isValid": true, "message": "Expression is valid"}`;
                                     autoArrangeOnLoad={true}
                                     shouldAutoArrange={shouldAutoArrange}
                                     dataServicesRootURI={dataServicesRootURI}
+                                    onLoadRuleWithChildren={handleMergeChain}
                                 />
                             </div>
                         </div>

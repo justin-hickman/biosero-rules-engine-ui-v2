@@ -1535,15 +1535,15 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                             {editingNode.actionType === "RuleEvaluationAction" && (
                                 <div>
                                     <Label htmlFor="targetRuleId" className="text-sm">Target Rule ID</Label>
-                                    <Input
-                                        id="targetRuleId"
-                                        value={editingNode.targetRuleId || ''}
-                                        onChange={(e) => setEditingNode({
+                                    <SimpleRuleSelector
+                                        dataServicesRootURI={dataServicesRootURI || ""}
+                                        onRuleSelect={(ruleId) => setEditingNode({
                                             ...editingNode,
-                                            targetRuleId: e.target.value
+                                            targetRuleId: ruleId
                                         })}
-                                        placeholder="Enter target rule ID"
-                                        className="mb-3"
+                                        value={editingNode.targetRuleId || ''}
+                                        placeholder="-- Select target rule --"
+                                        disabled={false}
                                     />
                                     
                                     <Label htmlFor="evaluationType" className="text-sm">Evaluation Type</Label>
@@ -1567,28 +1567,91 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                     </Select>
                                     
                                     <Label className="text-sm">Variable Mappings</Label>
-                                    <div className="text-xs text-muted-foreground mb-2">Map variables from current rule to target rule</div>
-                                    <Textarea
-                                        value={editingNode.variableMappings ? JSON.stringify(editingNode.variableMappings, null, 2) : '{}'}
-                                        onChange={(e) => {
-                                            try {
-                                                const mappings = JSON.parse(e.target.value);
+                                    <div className="text-xs text-muted-foreground mb-2">
+                                        Map variables from current context to target rule variables
+                                    </div>
+
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs text-muted-foreground">
+                                            Define how variables are passed to the target rule
+                                        </span>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                const currentMappings = Array.isArray(editingNode.variableMappings) 
+                                                    ? editingNode.variableMappings 
+                                                    : [];
                                                 setEditingNode({
                                                     ...editingNode,
-                                                    variableMappings: mappings
+                                                    variableMappings: [...currentMappings, { from: '', to: '' }]
                                                 });
-                                            } catch (error) {
-                                                // Invalid JSON, just store as is for user to fix
-                                                setEditingNode({
-                                                    ...editingNode,
-                                                    variableMappings: e.target.value
-                                                });
-                                            }
-                                        }}
-                                        placeholder='{\n  "sourceVar": "targetVar"\n}'
-                                        className="font-mono text-sm min-h-[150px] w-full"
-                                        rows={6}
-                                    />
+                                            }}
+                                        >
+                                            + Add Mapping
+                                        </Button>
+                                    </div>
+
+                                    <div className="space-y-2 max-h-60 overflow-y-auto border rounded-md p-2">
+                                        {(Array.isArray(editingNode.variableMappings) ? editingNode.variableMappings : []).map((mapping: any, index: number) => (
+                                            <div key={index} className="flex items-center gap-2 p-2 border rounded-md bg-muted/30">
+                                                <div className="flex-1">
+                                                    <Label className="text-xs text-muted-foreground">Source Variable</Label>
+                                                    <Input
+                                                        value={mapping.from || ''}
+                                                        onChange={(e) => {
+                                                            const newMappings = [...(Array.isArray(editingNode.variableMappings) ? editingNode.variableMappings : [])];
+                                                            newMappings[index] = { ...mapping, from: e.target.value };
+                                                            setEditingNode({
+                                                                ...editingNode,
+                                                                variableMappings: newMappings
+                                                            });
+                                                        }}
+                                                        placeholder="e.g., currentValue"
+                                                        className="text-sm"
+                                                    />
+                                                </div>
+                                                <div className="flex-1">
+                                                    <Label className="text-xs text-muted-foreground">Target Variable</Label>
+                                                    <Input
+                                                        value={mapping.to || ''}
+                                                        onChange={(e) => {
+                                                            const newMappings = [...(Array.isArray(editingNode.variableMappings) ? editingNode.variableMappings : [])];
+                                                            newMappings[index] = { ...mapping, to: e.target.value };
+                                                            setEditingNode({
+                                                                ...editingNode,
+                                                                variableMappings: newMappings
+                                                            });
+                                                        }}
+                                                        placeholder="e.g., inputValue"
+                                                        className="text-sm"
+                                                    />
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        const newMappings = (Array.isArray(editingNode.variableMappings) ? editingNode.variableMappings : []).filter((_: any, i: number) => i !== index);
+                                                        setEditingNode({
+                                                            ...editingNode,
+                                                            variableMappings: newMappings
+                                                        });
+                                                    }}
+                                                    className="text-red-600 hover:text-red-700 mt-5"
+                                                >
+                                                    Remove
+                                                </Button>
+                                            </div>
+                                        ))}
+                                        
+                                        {(!Array.isArray(editingNode.variableMappings) || editingNode.variableMappings.length === 0) && (
+                                            <div className="text-center py-4 text-muted-foreground text-sm">
+                                                No variable mappings defined. Click "Add Mapping" to create one.
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                             
@@ -1620,9 +1683,9 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                                 outputParameters: editingNode.outputParameters || {},
                                                 targetRuleId: editingNode.targetRuleId || '',
                                                 evaluationType: editingNode.evaluationType || '',
-                                                variableMappings: typeof editingNode.variableMappings === 'string' 
-                                                    ? {} 
-                                                    : editingNode.variableMappings || {}
+                                                variableMappings: Array.isArray(editingNode.variableMappings) 
+                                                    ? editingNode.variableMappings 
+                                                    : []
                                             }
                                         }
                                     };
@@ -1642,9 +1705,9 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                                                     outputParameters: editingNode.outputParameters || {},
                                                     targetRuleId: editingNode.targetRuleId || '',
                                                     evaluationType: editingNode.evaluationType || '',
-                                                    variableMappings: typeof editingNode.variableMappings === 'string' 
-                                                    ? {} 
-                                                    : editingNode.variableMappings || {}
+                                                    variableMappings: Array.isArray(editingNode.variableMappings) 
+                                                        ? editingNode.variableMappings 
+                                                        : []
                                                 } 
                                             }
                                             : node

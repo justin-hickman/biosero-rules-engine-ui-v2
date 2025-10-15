@@ -16,4 +16,15 @@ export default defineConfig({
       '@': resolve(projectRoot, 'src')
     }
   },
+  server: {
+    host: true,                // listen on all interfaces
+    port: 5173,
+    strictPort: true,
+    allowedHosts: ['sinewy-yvette-overheavily.ngrok-free.dev'], // <- your ngrok host
+    hmr: {
+      protocol: 'wss',         // HMR over HTTPS tunnel
+      host: 'sinewy-yvette-overheavily.ngrok-free.dev',
+      port: 443
+    }
+  }
 });
