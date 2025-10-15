@@ -46,6 +46,9 @@ export interface ContextListResponse {
 export interface ChainContext {
     chainId: string;
     workflowContextId?: string;
+    orderId?: string | null;
+    batchId?: string | null;
+    sampleId?: string | null;
     initialRuleName: string;
     currentRuleName: string;
     currentDepth: number;
@@ -93,6 +96,7 @@ export interface ChainStructure {
         ruleName: string;
         actionType: string;
         templateName: string | null;
+        evaluationExpression: string | null;
     }>;
 }
 
@@ -599,10 +603,60 @@ export class RulesEngineService {
                 success: result.success,
                 total: result.total,
                 count: result.count,
-                itemsCount: result.items?.length || 0
+                itemsCount: result.items?.length || 0,
+                responseStructure: {
+                    hasSuccess: 'success' in result,
+                    hasTotal: 'total' in result,
+                    hasCount: 'count' in result,
+                    hasItems: 'items' in result,
+                    actualKeys: Object.keys(result)
+                }
             });
             
-            return result;
+            // Handle different response structures
+            if (result.items) {
+                // New DTO structure with totalCount
+                if (result.totalCount !== undefined) {
+                    return {
+                        success: true,
+                        total: result.totalCount,
+                        count: result.items.length,
+                        page: result.page || 1,
+                        pageSize: result.pageSize || 50,
+                        items: result.items
+                    };
+                }
+                // Legacy structure
+                return result;
+            } else if (result.data && Array.isArray(result.data)) {
+                return {
+                    success: result.success || true,
+                    total: result.total || result.data.length,
+                    count: result.count || result.data.length,
+                    page: result.page || 1,
+                    pageSize: result.pageSize || 50,
+                    items: result.data
+                };
+            } else if (Array.isArray(result)) {
+                return {
+                    success: true,
+                    total: result.length,
+                    count: result.length,
+                    page: 1,
+                    pageSize: 50,
+                    items: result
+                };
+            } else {
+                console.warn('⚠️ BRE API: Unexpected response structure:', result);
+                return {
+                    success: false,
+                    total: 0,
+                    page: 1,
+                    pageSize: 50,
+                    count: 0,
+                    items: []
+                };
+            }
         } catch (error) {
             console.error(`❌ BRE API: Error fetching chain contexts:`, error);
             return {
@@ -696,41 +750,57 @@ export class RulesEngineService {
                     } catch {}
                 });
                 
-                // Extract sample ID from variables with proper nested parsing
-                // Priority 1: Main level
-                if (chain.variables?.sampleId) {
-                    sampleId = chain.variables.sampleId;
-                } else if (chain.variables?.SampleId) {
-                    sampleId = chain.variables.SampleId;
-                } 
-                // Priority 2: orchestratorWorkflowActionVariables
-                else if (chain.variables?.orchestratorWorkflowActionVariables?.sampleId) {
-                    sampleId = chain.variables.orchestratorWorkflowActionVariables.sampleId;
-                } else if (chain.variables?.orchestratorWorkflowActionVariables?.SampleId) {
-                    sampleId = chain.variables.orchestratorWorkflowActionVariables.SampleId;
-                }
-                // Priority 3: workflowVariables
-                else if (chain.variables?.workflowVariables?.sampleId) {
-                    sampleId = chain.variables.workflowVariables.sampleId;
-                } else if (chain.variables?.workflowVariables?.SampleId) {
-                    sampleId = chain.variables.workflowVariables.SampleId;
-                }
-                // Priority 4: gbgSchedulerActionVariables
-                else if (chain.variables?.gbgSchedulerActionVariables?.sampleId) {
-                    sampleId = chain.variables.gbgSchedulerActionVariables.sampleId;
-                } else if (chain.variables?.gbgSchedulerActionVariables?.SampleId) {
-                    sampleId = chain.variables.gbgSchedulerActionVariables.SampleId;
-                }
-                // Fallback: generic sample/Sample keys
-                else if (chain.variables?.sample) {
-                    sampleId = chain.variables.sample;
-                } else if (chain.variables?.Sample) {
-                    sampleId = chain.variables.Sample;
+                // Extract sample ID - NEW DTO has sampleId at top level
+                if (chain.sampleId) {
+                    sampleId = chain.sampleId;
+                } else {
+                    // Fallback to variables extraction if top-level sampleId is null
+                    // Priority 1: Main level (lowercase first, then uppercase)
+                    if (chain.variables?.sampleId) {
+                        sampleId = chain.variables.sampleId;
+                    } else if (chain.variables?.SampleId) {
+                        sampleId = chain.variables.SampleId;
+                    } 
+                    // Priority 2: orchestratorWorkflowActionVariables (lowercase first, then uppercase)
+                    else if (chain.variables?.orchestratorWorkflowActionVariables?.sampleId) {
+                        sampleId = chain.variables.orchestratorWorkflowActionVariables.sampleId;
+                    } else if (chain.variables?.orchestratorWorkflowActionVariables?.SampleId) {
+                        sampleId = chain.variables.orchestratorWorkflowActionVariables.SampleId;
+                    }
+                    // Priority 3: workflowVariables (lowercase first, then uppercase)
+                    else if (chain.variables?.workflowVariables?.sampleId) {
+                        sampleId = chain.variables.workflowVariables.sampleId;
+                    } else if (chain.variables?.workflowVariables?.SampleId) {
+                        sampleId = chain.variables.workflowVariables.SampleId;
+                    }
+                    // Priority 4: gbgSchedulerActionVariables (lowercase first, then uppercase)
+                    else if (chain.variables?.gbgSchedulerActionVariables?.sampleId) {
+                        sampleId = chain.variables.gbgSchedulerActionVariables.sampleId;
+                    } else if (chain.variables?.gbgSchedulerActionVariables?.SampleId) {
+                        sampleId = chain.variables.gbgSchedulerActionVariables.SampleId;
+                    }
+                    // Fallback: generic sample/Sample keys (lowercase first, then uppercase)
+                    else if (chain.variables?.sample) {
+                        sampleId = chain.variables.sample;
+                    } else if (chain.variables?.Sample) {
+                        sampleId = chain.variables.Sample;
+                    }
                 }
                 
-                if (chain.variables?.batchId) batchId = chain.variables.batchId;
-                if (chain.variables?.OrderId || chain.variables?.orderId) {
-                    orderId = chain.variables.OrderId || chain.variables.orderId;
+                // Extract batchId - NEW DTO has batchId at top level
+                if (chain.batchId) {
+                    batchId = chain.batchId;
+                } else if (chain.variables?.batchId) {
+                    batchId = chain.variables.batchId;
+                }
+                
+                // Extract orderId - NEW DTO has orderId at top level
+                if (chain.orderId) {
+                    orderId = chain.orderId;
+                } else if (chain.variables?.orderId) {
+                    orderId = chain.variables.orderId;
+                } else if (chain.variables?.OrderId) {
+                    orderId = chain.variables.OrderId;
                 }
                 
                 // If no sampleId found, try to generate one from available data
@@ -755,7 +825,26 @@ export class RulesEngineService {
                     sampleId,
                     batchId,
                     orderId,
-                    status: chain.status
+                    status: chain.status,
+                    dataSources: {
+                        sampleIdSource: chain.sampleId ? 'topLevel.sampleId' :
+                                      chain.variables?.sampleId ? 'variables.sampleId' : 
+                                      chain.variables?.SampleId ? 'variables.SampleId' :
+                                      chain.variables?.orchestratorWorkflowActionVariables?.sampleId ? 'orchestrator.sampleId' :
+                                      chain.variables?.orchestratorWorkflowActionVariables?.SampleId ? 'orchestrator.SampleId' :
+                                      chain.variables?.workflowVariables?.sampleId ? 'workflow.sampleId' :
+                                      chain.variables?.workflowVariables?.SampleId ? 'workflow.SampleId' :
+                                      chain.variables?.gbgSchedulerActionVariables?.sampleId ? 'gbg.sampleId' :
+                                      chain.variables?.gbgSchedulerActionVariables?.SampleId ? 'gbg.SampleId' :
+                                      chain.variables?.sample ? 'variables.sample' :
+                                      chain.variables?.Sample ? 'variables.Sample' : 'generated',
+                        orderIdSource: chain.orderId ? 'topLevel.orderId' :
+                                     chain.variables?.OrderId ? 'variables.OrderId' : 
+                                     chain.variables?.orderId ? 'variables.orderId' : 'none',
+                        batchIdSource: chain.batchId ? 'topLevel.batchId' :
+                                     chain.variables?.batchId ? 'variables.batchId' : 'none',
+                        timestampSource: chain.endTimestamp ? 'endTimestamp' : 'startTimestamp'
+                    }
                 });
                 
                 // Map chain status to context status - prioritize status string over boolean flags
@@ -806,12 +895,12 @@ export class RulesEngineService {
                 
                 return {
                     contextId: contextId || chain.chainId,
-                    orderId: orderId,
-                    batchId: batchId,
-                    sampleId: sampleId,
+                    orderId: orderId || undefined,
+                    batchId: batchId || undefined,
+                    sampleId: sampleId || undefined,
                     status: status,
                     createdAt: chain.startTimestamp,
-                    lastUpdatedAt: chain.endTimestamp || chain.startTimestamp,
+                    lastUpdatedAt: chain.endTimestamp || chain.startTimestamp, // Use endTimestamp for lastUpdatedAt
                     // Store chain reference
                     chainId: chain.chainId,
                     currentRuleName: chain.currentRuleName,

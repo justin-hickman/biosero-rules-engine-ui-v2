@@ -258,193 +258,56 @@ export const SampleMonitor = React.memo(function SampleMonitor({
         const nodes: Record<string, any> = {};
         const edges: Array<{ from: string; to: string; type: 'success' | 'failure' | 'connection'; label?: string }> = [];
         
-        console.log('🔧 Monitor: Building chain data from rich payload:', {
-            rulesCount: chainContext.rules?.length || 0,
+        console.log('🔧 Monitor: Building chain data from chainStructure only:', {
+            hasChainStructure: !!chainContext.chainStructure,
             edgesCount: chainContext.chainStructure?.edges?.length || 0,
-            statusMap: chainContext.ruleStatusMap,
-            rules: chainContext.rules,
-            chainStructure: chainContext.chainStructure,
-            currentRuleName: chainContext.currentRuleName,
-            initialRuleName: chainContext.initialRuleName,
-            fullContext: chainContext
+            actionsCount: chainContext.chainStructure?.actions?.length || 0,
+            ruleStatusMap: chainContext.ruleStatusMap
         });
         
-        // Add ALL nodes from rules with their status from ruleStatusMap
-        if (chainContext.rules && chainContext.rules.length > 0) {
-            // First, let's add missing rules from action execution records
-            const allRuleNames = new Set<string>();
-            
-            // Add current rules
-            chainContext.rules.forEach(rule => allRuleNames.add(rule.identifier));
-            
-            // Add missing rules from action execution records
-            if (chainContext.actionExecutionRecords) {
-                chainContext.actionExecutionRecords.forEach((record: any) => {
-                    // Extract rule names from action instance IDs
-                    const actionId = record.actionInstanceId;
-                    console.log('🔧 Monitor: Processing action record:', actionId);
-                    
-                    // Pattern: 000_AutomatedBRETest2_action_0_ExecuteOrchestratorWorkflowAction_RULENUZ18_...
-                    if (actionId.includes('_action_')) {
-                        const parts = actionId.split('_action_');
-                        if (parts.length >= 1) {
-                            const ruleName = parts[0]; // Everything before '_action_' is the rule name
-                            console.log('🔧 Monitor: Extracted rule name from action:', ruleName);
-                            if (ruleName && ruleName.length > 0) {
-                                allRuleNames.add(ruleName);
-                            }
-                        }
-                    }
-                    // Pattern: 000_AutomatedBRETest_RULENUZ18_ExecuteOrchestratorWorkflowAction
-                    else if (actionId.includes('_RULENUZ18_')) {
-                        const parts = actionId.split('_RULENUZ18_');
-                        if (parts.length >= 1) {
-                            const ruleName = parts[0]; // Everything before '_RULENUZ18_' is the rule name
-                            console.log('🔧 Monitor: Extracted rule name from action (pattern 2):', ruleName);
-                            if (ruleName && ruleName.length > 0) {
-                                allRuleNames.add(ruleName);
-                            }
-                        }
-                    }
-                });
-            }
-            
-            // Use chainStructure from API payload to get complete rule set
-            if (chainContext.chainStructure?.edges) {
-                chainContext.chainStructure.edges.forEach((edge: any) => {
-                    allRuleNames.add(edge.from);
-                    allRuleNames.add(edge.to);
-                });
-            }
-            
-            // Create a complete rules array including missing rules
-            const completeRules = [...chainContext.rules];
-            
-            // Add missing rules from action execution records
-            Array.from(allRuleNames).forEach(ruleName => {
-                if (!chainContext.rules.find(r => r.identifier === ruleName)) {
-                    // Create a rule entry for missing rules
-                    // Default status for missing rules
-                    let status = 'NotRun';
-                    
-                    completeRules.push({
-                        identifier: ruleName,
-                        name: ruleName,
-                        status: status,
-                        lastEvaluatedAt: null
-                    });
-                }
-            });
-            
-            // Sort rules by execution order - initial rule first, then by chain structure
-            const sortedRules = completeRules.sort((a, b) => {
-                // Initial rule should be first
-                if (a.identifier === chainContext.initialRuleName) return -1;
-                if (b.identifier === chainContext.initialRuleName) return 1;
+        // ONLY create nodes from chainStructure.actions (no other sources)
+        if (chainContext.chainStructure?.actions) {
+            chainContext.chainStructure.actions.forEach((action: any) => {
+                const ruleId = action.ruleId;
+                const ruleName = action.ruleName;
                 
-                // Then sort by current rule
-                if (a.identifier === chainContext.currentRuleName) return -1;
-                if (b.identifier === chainContext.currentRuleName) return 1;
-                
-                // Finally sort by name to maintain consistent order
-                return a.name.localeCompare(b.name);
-            });
-            
-            sortedRules.forEach((rule: any, index: number) => {
-                // Use ruleStatusMap for status, fallback to rule.status
-                // Handle case sensitivity - ruleStatusMap uses lowercase keys
-                const status = chainContext.ruleStatusMap?.[rule.identifier.toLowerCase()] || 
-                              chainContext.ruleStatusMap?.[rule.identifier] || 
-                              rule.status;
+                // Get status from ruleStatusMap (existing logic - don't change)
+                const status = chainContext.ruleStatusMap?.[ruleId.toLowerCase()] || 'NotRun';
                 const nodeStatus = status === 'Success' ? 'success' : 
                                   status === 'Failed' ? 'failed' : 
                                   status === 'NotRun' ? 'pending' : 'pending';
                 
-                console.log('🔧 Monitor: Rule status mapping:', {
-                    ruleId: rule.identifier,
-                    ruleName: rule.name,
-                    ruleStatus: rule.status,
-                    ruleStatusMapValue: chainContext.ruleStatusMap?.[rule.identifier.toLowerCase()],
-                    finalStatus: status,
-                    nodeStatus: nodeStatus
-                });
+                // Get variables from ruleStatusHistory (existing logic - don't change)
+                const ruleHistory = chainContext.ruleStatusHistory?.find((entry: any) => entry.ruleName === ruleId);
+                const variables = ruleHistory?.usedVariables || {};
                 
-                nodes[rule.identifier] = {
-                    id: rule.identifier,
-                    label: rule.name,
-                    ruleName: rule.name,
-                    ruleId: rule.identifier,
-                    status: nodeStatus,
-                    isCurrent: rule.identifier === chainContext.currentRuleName,
-                    lastEvaluatedAt: rule.lastEvaluatedAt,
-                    // Add position for visualization
-                    position: { x: 0, y: 0 } // Will be calculated by layout algorithm
-                };
-            });
-        } else {
-            // Fallback: create nodes from ruleStatusMap if no rules array or empty rules array
-            console.log('⚠️ Monitor: No rules array or empty rules array, using ruleStatusMap fallback');
-            if (chainContext.ruleStatusMap && Object.keys(chainContext.ruleStatusMap).length > 0) {
-                Object.entries(chainContext.ruleStatusMap).forEach(([ruleName, status], index) => {
-                    const nodeStatus = status === 'Success' ? 'success' : 
-                                      status === 'Failed' ? 'failed' : 
-                                      status === 'NotRun' ? 'pending' : 'pending';
-                    
-                    nodes[ruleName] = {
-                        id: ruleName,
-                        label: ruleName,
+                nodes[ruleId] = {
+                    id: ruleId,
+                    label: ruleName,  // Display name from chainStructure
                         ruleName: ruleName,
-                        ruleId: ruleName,
+                    ruleId: ruleId,
                         status: nodeStatus,
-                        isCurrent: ruleName === chainContext.currentRuleName,
-                        // Add position for visualization - will be calculated by layout algorithm
-                        position: { x: 0, y: 0 }
-                    };
+                    isCurrent: ruleId === chainContext.currentRuleName,
+                    isInitiating: ruleId === chainContext.initialRuleName,
+                    position: { x: 0, y: 0 }, // Will be positioned by layout
+                    // Keep existing fields for compatibility
+                    expression: `Expression for ${ruleName}`,
+                    description: '',
+                    lastEvaluatedAt: ruleHistory?.evaluatedAt,
+                    variables: variables
+                };
+                
+                console.log(`📊 Created node from chainStructure:`, {
+                    ruleId,
+                    ruleName,
+                    status,
+                    nodeStatus,
+                    hasVariables: Object.keys(variables).length > 0
                 });
-            } else {
-                // Final fallback: create nodes from chainStructure edges
-                console.log('⚠️ Monitor: No ruleStatusMap found, using chainStructure fallback');
-                if (chainContext.chainStructure?.edges && chainContext.chainStructure.edges.length > 0) {
-                    const allRuleNames = new Set<string>();
-                    chainContext.chainStructure.edges.forEach((edge: any) => {
-                        allRuleNames.add(edge.from);
-                        allRuleNames.add(edge.to);
-                    });
-                    
-                    Array.from(allRuleNames).forEach((ruleName, index) => {
-                        nodes[ruleName] = {
-                            id: ruleName,
-                            label: ruleName,
-                            ruleName: ruleName,
-                            ruleId: ruleName,
-                            status: ruleName === chainContext.currentRuleName ? 'processing' : 'pending',
-                            isCurrent: ruleName === chainContext.currentRuleName,
-                            position: { x: 0, y: 0 } // Will be calculated by layout algorithm
-                        };
-                    });
-                } else {
-                    // Ultimate fallback: create nodes from currentRuleName and initialRuleName
-                    console.log('⚠️ Monitor: No chainStructure edges, using currentRuleName/initialRuleName fallback');
-                    const ruleNames = new Set<string>();
-                    if (chainContext.currentRuleName) ruleNames.add(chainContext.currentRuleName);
-                    if (chainContext.initialRuleName) ruleNames.add(chainContext.initialRuleName);
-                    
-                    Array.from(ruleNames).forEach((ruleName, index) => {
-                        nodes[ruleName] = {
-                            id: ruleName,
-                            label: ruleName,
-                            ruleId: ruleName,
-                            status: ruleName === chainContext.currentRuleName ? 'processing' : 'pending',
-                            isCurrent: ruleName === chainContext.currentRuleName,
-                            position: { x: 0, y: 0 } // Will be calculated by layout algorithm
-                        };
-                    });
-                }
-            }
+            });
         }
         
-        
-        // Use chainStructure edges from API payload instead of hardcoded edges
+        // Create edges from chainStructure.edges (existing logic - don't change)
         if (chainContext.chainStructure?.edges) {
             chainContext.chainStructure.edges.forEach((edge: any) => {
                 // Only add edge if both nodes exist
@@ -485,17 +348,30 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     },
                     animated: animated
                 });
+                    
+                    console.log(`📊 Created edge:`, {
+                        from: edge.from,
+                        to: edge.to,
+                        type: edge.type,
+                        isExecutedPath,
+                        animated
+                    });
+                } else {
+                    console.log(`⚠️ Skipping edge - missing nodes:`, {
+                        from: edge.from,
+                        to: edge.to,
+                        fromExists: !!nodes[edge.from],
+                        toExists: !!nodes[edge.to]
+                    });
                 }
             });
         }
         
-        console.log('🔧 Monitor: Built chain data from payload:', {
-            nodesCount: Object.keys(nodes).length,
-            edgesCount: edges.length,
-            nodeNames: Object.keys(nodes),
-            nodeStatuses: Object.keys(nodes).map(id => ({ id, status: nodes[id].status })),
-            rulesProcessed: chainContext.rules?.length || 0,
-            ruleStatusMapKeys: Object.keys(chainContext.ruleStatusMap || {}).length
+        console.log('✅ Monitor: Built chain data from chainStructure:', {
+            nodeCount: Object.keys(nodes).length,
+            edgeCount: edges.length,
+            nodes: Object.keys(nodes),
+            edges: edges.map(e => `${e.from} -> ${e.to}`)
         });
         
         return { nodes, edges };
@@ -838,7 +714,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 console.log(`⚠️ Dialog: No rule action found for ${nodeId} in actions array (tried both ruleId and ruleName)`);
             }
         }
-
+        
         setSelectedNodeDetails({
             nodeId,
             ruleName,  // Add rule name for dialog display
@@ -1090,25 +966,25 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                                                         <ChevronDown className="w-4 h-4" />
                                                     </CollapsibleTrigger>
                                                     <CollapsibleContent>
-                                                        {selectedNodeDetails.executionResult?.isPending || !selectedNodeDetails.executionResult ? (
-                                                            <div className="mt-1 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
-                                                                <div className="text-sm text-yellow-800 dark:text-yellow-200 italic">
-                                                                    Rule is pending evaluation - no variables have been used yet
-                                                                </div>
-                                                            </div>
+                                            {selectedNodeDetails.executionResult?.isPending || !selectedNodeDetails.executionResult ? (
+                                                    <div className="mt-1 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
+                                                        <div className="text-sm text-yellow-800 dark:text-yellow-200 italic">
+                                                            Rule is pending evaluation - no variables have been used yet
+                                                        </div>
+                                                    </div>
                                                         ) : selectedNodeDetails.usedVariables && (Array.isArray(selectedNodeDetails.usedVariables) ? selectedNodeDetails.usedVariables.length > 0 : Object.keys(selectedNodeDetails.usedVariables).length > 0) ? (
                                                             <div className="mt-1 p-3 bg-muted/50 rounded-md">
                                                                 <pre className="text-xs font-mono overflow-auto max-h-96 whitespace-pre-wrap">
                                                                     {JSON.stringify(selectedNodeDetails.usedVariables, null, 2)}
                                                                 </pre>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="mt-1 p-3 bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-800 rounded-md">
-                                                                <div className="text-sm text-gray-600 dark:text-gray-400 italic">
-                                                                    No variables were used in this rule evaluation
-                                                                </div>
-                                                            </div>
-                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="mt-1 p-3 bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-800 rounded-md">
+                                                        <div className="text-sm text-gray-600 dark:text-gray-400 italic">
+                                                            No variables were used in this rule evaluation
+                                                        </div>
+                                                    </div>
+                                                )}
                                                     </CollapsibleContent>
                                                 </Collapsible>
                                             </div>

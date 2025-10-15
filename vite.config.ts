@@ -17,14 +17,13 @@ export default defineConfig({
     }
   },
   server: {
-    host: true,                // listen on all interfaces
+    host: 'localhost',        // listen on localhost only
     port: 5173,
     strictPort: true,
-    allowedHosts: ['sinewy-yvette-overheavily.ngrok-free.dev'], // <- your ngrok host
     hmr: {
-      protocol: 'wss',         // HMR over HTTPS tunnel
-      host: 'sinewy-yvette-overheavily.ngrok-free.dev',
-      port: 443
+      protocol: 'ws',         // HMR over regular WebSocket
+      host: 'localhost',
+      port: 5173
     }
   }
 });
