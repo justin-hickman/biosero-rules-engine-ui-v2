@@ -424,3 +424,8 @@ div[data-status="success"] {
   border-style: solid !important;
 }
 
+/* Override React Flow background dots color for dark mode */
+.react-flow__background {
+  color: #1f2937 !important;
+}
+

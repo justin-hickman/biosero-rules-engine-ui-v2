@@ -1262,7 +1262,7 @@ const ChainFlowReactFlowInner: React.FC<ChainFlowProps> = ({
                 className="bg-slate-50 dark:bg-slate-900"
                 style={{ width: '100%', height: '100%' }}
             >
-                <Background color="#94a3b8" gap={16} />
+                <Background color="#1f2937" gap={16} />
             </ReactFlow>
             
             {/* Instructions when empty */}
