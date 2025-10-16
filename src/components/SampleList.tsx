@@ -386,10 +386,32 @@ export const SampleList = React.memo(function SampleList({
         return grouped;
     }, [samples]);
 
-    // Notify parent when samples change
+    // CRITICAL: DO NOT CHANGE - This prevents unnecessary handleSamplesChange calls
+    // Only notify when samples actually change, not just when regrouped
+    const prevSamplesRef = useRef<WorkflowContext[]>([]);
+    
     useEffect(() => {
         const allSamples = Object.values(groupedSamples).flat();
-        onSamplesChange?.(allSamples);
+        
+        // Compare sample existence using Sets, not order or status
+        const currentIds = new Set(allSamples.map(s => s.sampleId));
+        const prevIds = new Set(prevSamplesRef.current.map(s => s.sampleId));
+        
+        // Only notify if samples were added or removed (bidirectional check)
+        const hasChanges = currentIds.size !== prevIds.size || 
+                           [...currentIds].some(id => !prevIds.has(id)) ||
+                           [...prevIds].some(id => !currentIds.has(id));
+        
+        if (hasChanges) {
+            console.log('📋 SampleList: Samples changed, notifying parent', {
+                prevCount: prevIds.size,
+                currentCount: currentIds.size,
+                added: [...currentIds].filter(id => !prevIds.has(id)),
+                removed: [...prevIds].filter(id => !currentIds.has(id))
+            });
+            prevSamplesRef.current = allSamples;
+            onSamplesChange?.(allSamples);
+        }
     }, [groupedSamples, onSamplesChange]);
 
     // Pagination logic

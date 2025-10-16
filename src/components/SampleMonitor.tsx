@@ -75,16 +75,22 @@ export const SampleMonitor = React.memo(function SampleMonitor({
             return;
         }
         
-        // If currently selected sample is not in the new list, clear selection
-        if (selectedContext) {
-            const sampleStillExists = samples.some(s => s.sampleId === selectedContext.sampleId);
+        // CRITICAL: DO NOT CHANGE - Only handle sample removal, not status updates
+        // Use selectedContextRef to avoid dependency on selectedContext state
+        const currentContext = selectedContextRef.current;
+        if (currentContext) {
+            // Find the sample in the new list
+            const sampleStillExists = samples.some(s => s.sampleId === currentContext.sampleId);
+            
             if (!sampleStillExists) {
+                // Sample truly doesn't exist anymore, clear selection
                 setSelectedContext(null);
                 setChainExecution(null);
                 setDynamicChainData(null);
             }
+            // Do nothing if sample exists - let fetchChainExecution handle all status updates
         }
-    }, [selectedContext]);
+    }, []); // NO DEPENDENCIES - prevents recreation and circular updates
     
     
     // Memoize chain data to prevent unnecessary re-renders with optimized comparison
@@ -416,11 +422,46 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                         if (!prevContext) return prevContext;
                         
                         // Create updated context with latest status from chain execution
-                        return {
+                        // Convert chainContext status string to ContextStatus enum
+                        let newStatus = prevContext.status; // Default to current status
+                        
+                        if (chainContext.status) {
+                            switch (chainContext.status) {
+                                case 'Pending':
+                                case 'Running':
+                                    newStatus = 0; // ContextStatus.Active
+                                    break;
+                                case 'Complete':
+                                case 'Completed':
+                                    // Check if any rule failed to determine if it's actually failed
+                                    const hasFailedRule = chainContext.ruleStatusHistory?.some(h => !h.isSuccess);
+                                    newStatus = hasFailedRule ? 2 : 1; // ContextStatus.Failed : ContextStatus.Complete
+                                    break;
+                                case 'Failed':
+                                    newStatus = 2; // ContextStatus.Failed
+                                    break;
+                                case 'Paused':
+                                    newStatus = 3; // ContextStatus.Paused
+                                    break;
+                            }
+                        }
+                        
+                        const updatedContext = {
                             ...prevContext,
-                            status: chainContext.isComplete ? 1 : (chainContext.status || prevContext.status),
+                            status: newStatus,
                             lastUpdatedAt: chainContext.lastUpdatedAt || prevContext.lastUpdatedAt
                         };
+                        
+                        console.log('🔄 SampleMonitor: Updating selectedContext with new status', {
+                            sampleId: updatedContext.sampleId,
+                            oldStatus: prevContext.status,
+                            newStatus: newStatus,
+                            chainStatus: chainContext.status,
+                            isActive: chainContext.isActive,
+                            isComplete: chainContext.isComplete
+                        });
+                        
+                        return updatedContext;
                     });
                 }
                 
@@ -510,6 +551,11 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     const lastDataString = lastChainDataRef.current ? JSON.stringify(lastChainDataRef.current) : null;
                     
                     if (chainDataString !== lastDataString) {
+                        console.log('🎨 SampleMonitor: Updating dynamicChainData for canvas', {
+                            nodeCount: Object.keys(chainData.nodes).length,
+                            edgeCount: chainData.edges.length,
+                            hasStatusMap: !!chainContext.ruleStatusMap
+                        });
                         lastChainDataRef.current = chainData;
                         setDynamicChainData(chainData);
                     }
@@ -530,9 +576,15 @@ export const SampleMonitor = React.memo(function SampleMonitor({
 
     // Handle sample selection - use ref to avoid dependency on fetchChainExecution
     const fetchChainExecutionRef = useRef(fetchChainExecution);
+    const selectedContextRef = useRef<WorkflowContext | null>(null);
     useEffect(() => {
         fetchChainExecutionRef.current = fetchChainExecution;
     }, [fetchChainExecution]);
+
+    // Keep selectedContextRef in sync with selectedContext for polling
+    useEffect(() => {
+        selectedContextRef.current = selectedContext;
+    }, [selectedContext]);
 
     const handleSampleSelect = useCallback(async (context: WorkflowContext) => {
         setSelectedContext(context);
@@ -762,8 +814,12 @@ export const SampleMonitor = React.memo(function SampleMonitor({
         if (selectedContext && currentAutoRefresh) {
             pollingIntervalRef.current = setInterval(async () => {
                 try {
-                    // Use the ref to avoid dependency on fetchChainExecution
-                    await fetchChainExecutionRef.current(selectedContext);
+                    // CRITICAL: Use selectedContextRef to get the latest selectedContext value
+                    // This ensures polling always uses fresh data, not stale closure values
+                    const currentContext = selectedContextRef.current;
+                    if (currentContext) {
+                        await fetchChainExecutionRef.current(currentContext);
+                    }
                 } catch (error) {
                     console.error('Polling error:', error);
                 }

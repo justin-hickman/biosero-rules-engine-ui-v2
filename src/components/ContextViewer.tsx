@@ -298,21 +298,21 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                     <div className="flex items-center justify-between mb-3">
                         <h2 className="text-lg font-semibold">Sample Details</h2>
                         <div className="flex gap-2">
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        size="icon"
-                                        variant="ghost"
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            size="icon"
+                                            variant="ghost"
                                         onClick={() => setShowAdvancedActions(true)}
                                         title="Advanced Actions"
-                                    >
+                                        >
                                         <Wrench className="w-4 h-4" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
                                     <p>Advanced developer actions</p>
-                                </TooltipContent>
-                            </Tooltip>
+                                    </TooltipContent>
+                                </Tooltip>
                             <Button
                                 size="icon"
                                 variant="ghost"
@@ -451,11 +451,16 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Clock className="w-3 h-3" />
                         <span>
-                            Ran for {chainExecution ? 
+                            {context?.status === 0 ? (
+                                <span className="text-yellow-500">• Pending completion</span>
+                            ) : (
+                                <>
+                                    Ran for {chainExecution ? 
                                 rulesEngineService.formatDuration(chainExecution.startTimestamp, chainExecution.endTimestamp || new Date().toISOString()) :
                                 rulesEngineService.formatDuration(context.createdAt, context.lastUpdatedAt)
                             }
-                            {context?.status === 0 && <span className="text-yellow-500 ml-2">• Pending completion</span>}
+                                </>
+                            )}
                         </span>
                     </div>
                 </div>

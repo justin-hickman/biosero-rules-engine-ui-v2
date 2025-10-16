@@ -5804,13 +5804,13 @@ function App() {
                                      Data Services:
                                  </label>
                                  <div className="flex items-center gap-2">
-                                     <Input
-                                         id="ds-url"
-                                         value={dataServicesRootURI}
-                                         onChange={(e) => setDataServicesRootURI(e.target.value?.trim() || "")}
-                                         placeholder={DATA_SERVICES_DEFAULT_URL}
-                                         className="w-64 text-sm"
-                                     />
+                                 <Input
+                                     id="ds-url"
+                                     value={dataServicesRootURI}
+                                     onChange={(e) => setDataServicesRootURI(e.target.value?.trim() || "")}
+                                     placeholder={DATA_SERVICES_DEFAULT_URL}
+                                     className="w-64 text-sm"
+                                 />
                                      {urlSaveIndicator.ds && (
                                          <span className="text-xs text-green-600 flex items-center gap-1">
                                              <CheckCircle className="w-3 h-3" weight="fill" /> Saved
@@ -5991,13 +5991,13 @@ If port 8105 is busy, try:
                                      Rules Engine:
                                  </label>
                                  <div className="flex items-center gap-2">
-                                     <Input
-                                         id="re-url"
-                                         value={rulesEngineRootURI}
-                                         onChange={(e) => setRulesEngineRootURI(e.target.value?.trim() || "")}
-                                         placeholder={RULES_ENGINE_DEFAULT_URL}
-                                         className="w-64 text-sm"
-                                     />
+                                 <Input
+                                     id="re-url"
+                                     value={rulesEngineRootURI}
+                                     onChange={(e) => setRulesEngineRootURI(e.target.value?.trim() || "")}
+                                     placeholder={RULES_ENGINE_DEFAULT_URL}
+                                     className="w-64 text-sm"
+                                 />
                                      {urlSaveIndicator.re && (
                                          <span className="text-xs text-green-600 flex items-center gap-1">
                                              <CheckCircle className="w-3 h-3" weight="fill" /> Saved
