@@ -370,30 +370,7 @@ function MonitorChainFlowInner({
     onNodeClick,
     chainContext
 }: MonitorChainFlowProps) {
-    // Force re-render every second while chain is active
-    const [, setForceUpdate] = useState(0);
-    const forceUpdateTimerRef = useRef<number | null>(null);
-
-    useEffect(() => {
-        // Clear existing timer
-        if (forceUpdateTimerRef.current) {
-            clearInterval(forceUpdateTimerRef.current);
-            forceUpdateTimerRef.current = null;
-        }
-        
-        if (chainContext?.isActive && !chainContext?.isComplete) {
-            forceUpdateTimerRef.current = setInterval(() => {
-                setForceUpdate(v => v + 1);
-            }, 1000); // Update every 1 second for real-time animations (only for selected sample)
-        }
-        
-        return () => {
-            if (forceUpdateTimerRef.current) {
-                clearInterval(forceUpdateTimerRef.current);
-                forceUpdateTimerRef.current = null;
-            }
-        };
-    }, [chainContext?.isActive, chainContext?.isComplete]);
+    // ReactFlow will handle animations naturally through prop updates
     // Calculate nodes and edges from chain data or execution history
     const { nodes, edges } = useMemo(() => {
         
@@ -755,7 +732,7 @@ function MonitorChainFlowInner({
         }
 
         return { nodes: newNodes, edges: newEdges };
-    }, [chainData, executionHistory, currentRuleName, chainContext, chainContext?.rules]);
+    }, [chainData, executionHistory, currentRuleName, chainContext?.rules, chainContext?.ruleStatusMap]);
 
     const handleNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
         if (onNodeClick) {

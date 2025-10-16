@@ -47,13 +47,28 @@ import {
 } from "@phosphor-icons/react";
 import { toast } from 'sonner';
 
-// Simple localStorage hook to replace Spark's useKV
+// Enhanced localStorage hook with better error handling, logging, and cross-tab sync
 function useLocalStorage<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
     const [storedValue, setStoredValue] = React.useState<T>(() => {
         try {
             const item = window.localStorage.getItem(key);
-            return item ? JSON.parse(item) : initialValue;
+            if (item === null) {
+                // Key doesn't exist, initialize with default
+                console.log(`[localStorage] Initializing "${key}" with default:`, initialValue);
+                window.localStorage.setItem(key, JSON.stringify(initialValue));
+                return initialValue;
+            }
+            const parsed = JSON.parse(item);
+            console.log(`[localStorage] Loaded "${key}":`, parsed);
+            return parsed;
         } catch (error) {
+            console.error(`[localStorage] Error loading "${key}":`, error);
+            // Try to recover by saving the initial value
+            try {
+                window.localStorage.setItem(key, JSON.stringify(initialValue));
+            } catch (e) {
+                console.error(`[localStorage] Cannot save "${key}":`, e);
+            }
             return initialValue;
         }
     });
@@ -63,10 +78,29 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, React.Dispatch<Re
             const valueToStore = value instanceof Function ? value(storedValue) : value;
             setStoredValue(valueToStore);
             window.localStorage.setItem(key, JSON.stringify(valueToStore));
+            console.log(`[localStorage] Saved "${key}":`, valueToStore);
         } catch (error) {
-            console.error('Error saving to localStorage:', error);
+            console.error(`[localStorage] Error saving "${key}":`, error);
         }
     };
+
+    // Sync with localStorage changes from other tabs/windows
+    React.useEffect(() => {
+        const handleStorageChange = (e: StorageEvent) => {
+            if (e.key === key && e.newValue !== null) {
+                try {
+                    const newValue = JSON.parse(e.newValue);
+                    console.log(`[localStorage] External change detected for "${key}":`, newValue);
+                    setStoredValue(newValue);
+                } catch (error) {
+                    console.error(`[localStorage] Error parsing external change for "${key}":`, error);
+                }
+            }
+        };
+
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
+    }, [key]);
 
     return [storedValue, setValue];
 }
@@ -4409,6 +4443,46 @@ function App() {
     const [rulesEngineRootURI, setRulesEngineRootURI] = useLocalStorage("rules-engine-uri", RULES_ENGINE_DEFAULT_URL);
     const [dataServicesRootURI, setDataServicesRootURI] = useLocalStorage("data-services-uri", DATA_SERVICES_DEFAULT_URL);
 
+    // Verify URL persistence on mount
+    React.useEffect(() => {
+        const stored = {
+            rulesEngine: localStorage.getItem('rules-engine-uri'),
+            dataServices: localStorage.getItem('data-services-uri')
+        };
+        
+        console.log('[URL Config] Verification on mount:', {
+            fromLocalStorage: stored,
+            currentState: {
+                rulesEngine: rulesEngineRootURI,
+                dataServices: dataServicesRootURI
+            }
+        });
+
+        // If localStorage has values but state doesn't match, something is wrong
+        if (stored.rulesEngine && JSON.parse(stored.rulesEngine) !== rulesEngineRootURI) {
+            console.warn('[URL Config] Mismatch detected for Rules Engine URL!');
+        }
+        if (stored.dataServices && JSON.parse(stored.dataServices) !== dataServicesRootURI) {
+            console.warn('[URL Config] Mismatch detected for Data Services URL!');
+        }
+    }, []);
+
+    // Visual "Saved" indicator for URL inputs
+    const [urlSaveIndicator, setUrlSaveIndicator] = React.useState<{ds: boolean, re: boolean}>({ds: false, re: false});
+
+    // Show "saved" indicator when URLs change
+    React.useEffect(() => {
+        setUrlSaveIndicator(prev => ({...prev, ds: true}));
+        const timer = setTimeout(() => setUrlSaveIndicator(prev => ({...prev, ds: false})), 2000);
+        return () => clearTimeout(timer);
+    }, [dataServicesRootURI]);
+
+    React.useEffect(() => {
+        setUrlSaveIndicator(prev => ({...prev, re: true}));
+        const timer = setTimeout(() => setUrlSaveIndicator(prev => ({...prev, re: false})), 2000);
+        return () => clearTimeout(timer);
+    }, [rulesEngineRootURI]);
+
     // Session state using useState for temporary UI state
     const [rulesEngineHealthStatus, setRulesEngineHealthStatus] = React.useState<HealthStatus>('idle');
     const [rulesEngineHealthMessage, setRulesEngineHealthMessage] = React.useState('');
@@ -5729,13 +5803,20 @@ function App() {
                                  <label htmlFor="ds-url" className="text-sm text-muted-foreground whitespace-nowrap">
                                      Data Services:
                                  </label>
-                                 <Input
-                                     id="ds-url"
-                                     value={dataServicesRootURI}
-                                     onChange={(e) => setDataServicesRootURI(e.target.value?.trim() || "")}
-                                     placeholder={DATA_SERVICES_DEFAULT_URL}
-                                     className="w-64 text-sm"
-                                 />
+                                 <div className="flex items-center gap-2">
+                                     <Input
+                                         id="ds-url"
+                                         value={dataServicesRootURI}
+                                         onChange={(e) => setDataServicesRootURI(e.target.value?.trim() || "")}
+                                         placeholder={DATA_SERVICES_DEFAULT_URL}
+                                         className="w-64 text-sm"
+                                     />
+                                     {urlSaveIndicator.ds && (
+                                         <span className="text-xs text-green-600 flex items-center gap-1">
+                                             <CheckCircle className="w-3 h-3" weight="fill" /> Saved
+                                         </span>
+                                     )}
+                                 </div>
                                  <HealthStatusButton
                                      status={dataServicesHealthStatus}
                                      message={dataServicesHealthMessage}
@@ -5909,13 +5990,20 @@ If port 8105 is busy, try:
                                  <label htmlFor="re-url" className="text-sm text-muted-foreground whitespace-nowrap">
                                      Rules Engine:
                                  </label>
-                                 <Input
-                                     id="re-url"
-                                     value={rulesEngineRootURI}
-                                     onChange={(e) => setRulesEngineRootURI(e.target.value?.trim() || "")}
-                                     placeholder={RULES_ENGINE_DEFAULT_URL}
-                                     className="w-64 text-sm"
-                                 />
+                                 <div className="flex items-center gap-2">
+                                     <Input
+                                         id="re-url"
+                                         value={rulesEngineRootURI}
+                                         onChange={(e) => setRulesEngineRootURI(e.target.value?.trim() || "")}
+                                         placeholder={RULES_ENGINE_DEFAULT_URL}
+                                         className="w-64 text-sm"
+                                     />
+                                     {urlSaveIndicator.re && (
+                                         <span className="text-xs text-green-600 flex items-center gap-1">
+                                             <CheckCircle className="w-3 h-3" weight="fill" /> Saved
+                                         </span>
+                                     )}
+                                 </div>
                                  <HealthStatusButton
                                      status={rulesEngineHealthStatus}
                                      message={rulesEngineHealthMessage}

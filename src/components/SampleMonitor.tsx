@@ -59,12 +59,32 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     const [currentAutoRefresh, setCurrentAutoRefresh] = useState(isAutoRefresh);
     const lastStableDataRef = React.useRef<string | null>(null);
     const lastChainDataRef = React.useRef<ChainData | null>(null);
-    const [ruleStatusVersion, setRuleStatusVersion] = useState(0);
     
     // Handle auto-refresh state changes from SampleList
     const handleAutoRefreshChange = useCallback((isAutoRefresh: boolean) => {
         setCurrentAutoRefresh(isAutoRefresh);
     }, []);
+
+    // Handle sample list changes to clear selection when needed
+    const handleSamplesChange = useCallback((samples: WorkflowContext[]) => {
+        // If there are no samples, clear selection
+        if (samples.length === 0) {
+            setSelectedContext(null);
+            setChainExecution(null);
+            setDynamicChainData(null);
+            return;
+        }
+        
+        // If currently selected sample is not in the new list, clear selection
+        if (selectedContext) {
+            const sampleStillExists = samples.some(s => s.sampleId === selectedContext.sampleId);
+            if (!sampleStillExists) {
+                setSelectedContext(null);
+                setChainExecution(null);
+                setDynamicChainData(null);
+            }
+        }
+    }, [selectedContext]);
     
     // Sync currentAutoRefresh with the prop
     useEffect(() => {
@@ -74,20 +94,15 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     // Memoize chain data to prevent unnecessary re-renders with optimized comparison
     const stableChainData = React.useMemo(() => {
         const currentData = dynamicChainData || fullChainData || chainData;
-        
-        // Create a stable reference that only changes when the actual content changes
         if (!currentData) return null;
         
-        // Use simple hash instead of expensive JSON.stringify
-        const nodeCount = Object.keys(currentData.nodes || {}).length;
-        const edgeCount = (currentData.edges || []).length;
-        const dataKey = `${nodeCount}-${edgeCount}`;
+        // Create a deep comparison key including node statuses
+        const statusKey = Object.entries(currentData.nodes || {})
+            .map(([id, node]) => `${id}:${node.status}`)
+            .sort()
+            .join('|');
         
-        // Return the current data with a stable key
-        return {
-            ...currentData,
-            _stableKey: dataKey
-        };
+        return currentData; // Return raw data without wrapper
     }, [fullChainData, dynamicChainData, chainData]);
     
     const rulesEngineService = React.useMemo(
@@ -417,9 +432,6 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     );
                     
                     // Force new reference if rules changed
-                    if (hasRuleStatusChange) {
-                        setRuleStatusVersion(v => v + 1);
-                    }
                     return hasRuleStatusChange ? { ...chainContext } : prevExecution;
                 });
                 
@@ -758,6 +770,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                         rulesEngineUrl={rulesEngineUrl}
                         selectedSampleId={selectedContext?.sampleId}
                         onSampleSelect={handleSampleSelect}
+                        onSamplesChange={handleSamplesChange}
                         onAutoRefreshChange={handleAutoRefreshChange}
                         isAutoRefresh={currentAutoRefresh}
                     />
@@ -804,7 +817,6 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 ) : stableChainData ? (
                     <div className="h-full">
                         <MonitorChainFlowWrapper
-                            key={`${stableChainData?._stableKey || 'no-data'}-v${ruleStatusVersion}`}
                             chainData={stableChainData}
                             executionHistory={chainExecution.ruleStatusHistory}
                             currentRuleName={chainExecution.currentRuleName}

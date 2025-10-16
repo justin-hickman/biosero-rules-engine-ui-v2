@@ -22,6 +22,7 @@ interface SampleListProps {
     rulesEngineUrl: string;
     selectedSampleId?: string;
     onSampleSelect: (sample: WorkflowContext) => void;
+    onSamplesChange?: (samples: WorkflowContext[]) => void;
     refreshInterval?: number;
     onAutoRefreshChange?: (isAutoRefresh: boolean) => void;
     isAutoRefresh?: boolean;
@@ -31,6 +32,7 @@ export const SampleList = React.memo(function SampleList({
     rulesEngineUrl,
     selectedSampleId,
     onSampleSelect,
+    onSamplesChange,
     refreshInterval = 3000,
     onAutoRefreshChange,
     isAutoRefresh: externalAutoRefresh = false
@@ -100,6 +102,12 @@ export const SampleList = React.memo(function SampleList({
         () => new RulesEngineService(rulesEngineUrl),
         [rulesEngineUrl]
     );
+
+    // Stabilize rulesEngineService with useRef to prevent renderSampleCard from recreating
+    const rulesEngineServiceRef = useRef(rulesEngineService);
+    useEffect(() => {
+        rulesEngineServiceRef.current = rulesEngineService;
+    }, [rulesEngineService]);
 
     // Stabilize fetchSamples with useRef to prevent recreation
     const fetchSamplesRef = useRef<() => Promise<void>>(() => Promise.resolve());
@@ -374,6 +382,12 @@ export const SampleList = React.memo(function SampleList({
         return grouped;
     }, [samples]);
 
+    // Notify parent when samples change
+    useEffect(() => {
+        const allSamples = Object.values(groupedSamples).flat();
+        onSamplesChange?.(allSamples);
+    }, [groupedSamples, onSamplesChange]);
+
     // Pagination logic
     const paginatedSamples = useMemo(() => {
         if (filterStatus === 'all') {
@@ -433,90 +447,27 @@ export const SampleList = React.memo(function SampleList({
         });
     }, []);
 
-    // Memoized sample card component to prevent unnecessary re-renders
-    const SampleCard = React.memo(({ sample, autoRefresh, isSelected, onSelect, rulesEngineService }: {
-        sample: WorkflowContext;
-        autoRefresh: boolean;
-        isSelected: boolean;
-        onSelect: (sample: WorkflowContext) => void;
-        rulesEngineService: RulesEngineService;
-    }) => {
-        // Better status icons
-        const statusIcon = sample.status === ContextStatus.Complete ? (
-            <CheckCircle className="w-4 h-4 text-green-500" />
-        ) : sample.status === ContextStatus.Failed ? (
-            <XCircle className="w-4 h-4 text-red-500" />
-        ) : sample.status === ContextStatus.Active ? (
-            <Clock className="w-4 h-4 text-blue-500" />
-        ) : (
-            <Clock className="w-4 h-4 text-gray-500" />
-        );
 
-        // Create a stable key that won't change unless the sample actually changes
-        const stableKey = `${sample.sampleId}-${sample.status}-${sample.chainId || 'no-chain'}`;
-        
-        return (
-            <Card
-                key={stableKey}
-                className={cn(
-                    "p-3 cursor-pointer transition-all duration-200 hover:shadow-md mb-2",
-                    isSelected ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-800"
-                )}
-                onClick={() => onSelect(sample)}
-            >
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        {statusIcon}
-                        <div>
-                            <div className="font-medium text-sm">{sample.sampleId}</div>
-                            {sample.orderId && (
-                                <div className="text-xs text-muted-foreground">Order: {sample.orderId}</div>
-                            )}
-                            {sample.batchId && (
-                                <div className="text-xs text-muted-foreground">Batch: {sample.batchId}</div>
-                            )}
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Badge variant={
-                            sample.status === ContextStatus.Complete ? "default" :
-                            sample.status === ContextStatus.Failed ? "destructive" :
-                            sample.status === ContextStatus.Active ? "secondary" :
-                            "outline"
-                        }>
-                            {ContextStatus[sample.status]}
-                        </Badge>
-                        <div className="text-xs text-muted-foreground flex items-center gap-1">
-                            <span>
-                                {sample.status === ContextStatus.Active ? 
-                                    rulesEngineService.formatDuration(sample.createdAt, new Date().toISOString()) :
-                                    rulesEngineService.formatDuration(sample.createdAt, sample.lastUpdatedAt)
-                                }
-                            </span>
-                            {autoRefresh && sample.status === ContextStatus.Active && (
-                                <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" title="Live updates enabled" />
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </Card>
-        );
-    });
+    // Memoize status icons to prevent recreation
+    const getStatusIcon = useCallback((status: ContextStatus) => {
+        switch (status) {
+            case ContextStatus.Complete:
+                return <CheckCircle className="w-4 h-4 text-green-500" />;
+            case ContextStatus.Failed:
+                return <XCircle className="w-4 h-4 text-red-500" />;
+            case ContextStatus.Active:
+                return <Clock className="w-4 h-4 text-blue-500" />;
+            default:
+                return <Clock className="w-4 h-4 text-gray-500" />;
+        }
+    }, []);
 
     // Render sample card with stable key and memoization - simplified
     const renderSampleCard = useCallback((sample: WorkflowContext, autoRefresh: boolean) => {
         const isSelected = selectedSampleId === sample.sampleId;
         
-        // Better status icons
-        const statusIcon = sample.status === ContextStatus.Complete ? (
-            <CheckCircle className="w-4 h-4 text-green-500" />
-        ) : sample.status === ContextStatus.Failed ? (
-            <XCircle className="w-4 h-4 text-red-500" />
-        ) : sample.status === ContextStatus.Active ? (
-            <Clock className="w-4 h-4 text-blue-500" />
-        ) : (
-            <Clock className="w-4 h-4 text-gray-500" />
-        );
+        // Use memoized status icon
+        const statusIcon = getStatusIcon(sample.status);
 
         // Create a stable key that won't change unless the sample actually changes
         const stableKey = `${sample.sampleId}-${sample.status}-${sample.chainId || 'no-chain'}`;
@@ -555,8 +506,8 @@ export const SampleList = React.memo(function SampleList({
                         <div className="text-xs text-muted-foreground flex items-center gap-1">
                             <span>
                                 {sample.status === ContextStatus.Active ? 
-                                    rulesEngineService.formatDuration(sample.createdAt, new Date().toISOString()) :
-                                    rulesEngineService.formatDuration(sample.createdAt, sample.lastUpdatedAt)
+                                    rulesEngineServiceRef.current.formatDuration(sample.createdAt, new Date().toISOString()) :
+                                    rulesEngineServiceRef.current.formatDuration(sample.createdAt, sample.lastUpdatedAt)
                                 }
                             </span>
                             {autoRefresh && sample.status === ContextStatus.Active && (
@@ -567,7 +518,7 @@ export const SampleList = React.memo(function SampleList({
                 </div>
             </Card>
         );
-    }, [selectedSampleId, onSampleSelect, rulesEngineService]);
+    }, [selectedSampleId, onSampleSelect]);
 
     const totalCount = useMemo(() => {
         if (groupingType === 'sample') {

@@ -358,7 +358,7 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                             <CardContent className="pt-0 pb-3">
                                 <div className="space-y-2">
                                     <div className="flex justify-between items-center">
-                                        <span className="text-muted-foreground text-xs font-medium">Context ID</span>
+                                        <span className="text-muted-foreground text-xs font-medium">Rule Chain ID</span>
                                         <span className="font-mono text-xs break-all text-right max-w-[180px]">{context.contextId}</span>
                                     </div>
                                     
