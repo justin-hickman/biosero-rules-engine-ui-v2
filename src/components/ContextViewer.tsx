@@ -296,7 +296,7 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
             <div className="px-4 py-4 border-b flex-shrink-0">
                 <TooltipProvider>
                     <div className="flex items-center justify-between mb-3">
-                        <h2 className="text-lg font-semibold">Context Details</h2>
+                        <h2 className="text-lg font-semibold">Sample Details</h2>
                         <div className="flex gap-2">
                             <Tooltip>
                                 <TooltipTrigger asChild>
@@ -370,7 +370,10 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                                     <div className="flex items-center justify-between text-xs">
                                         <Tooltip>
                                             <TooltipTrigger asChild>
-                                                <span className="text-muted-foreground cursor-help">Progress</span>
+                                                <span className="text-muted-foreground cursor-help flex items-center gap-1">
+                                                    Progress
+                                                    <Info className="w-3 h-3" />
+                                                </span>
                                             </TooltipTrigger>
                                             <TooltipContent className="max-w-md">
                                                 <div className="space-y-3">

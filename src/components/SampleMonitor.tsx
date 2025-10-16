@@ -377,9 +377,14 @@ export const SampleMonitor = React.memo(function SampleMonitor({
 
     // Fetch chain execution details using the new rich payload structure
     const fetchChainExecution = useCallback(async (context: WorkflowContext) => {
+        // Guard against null context
+        if (!context) {
+            return;
+        }
+        
         // Only show loading on initial load, not during auto-refresh
         if (isInitialChainLoad) {
-        setIsLoadingChain(true);
+            setIsLoadingChain(true);
         }
         try {
             console.log('🔍 Monitor: Fetching chain execution for context:', {
@@ -479,21 +484,23 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 // Update chainExecution immediately (no debounce for status changes)
                 // This ensures real-time status updates
                 
-                // Only debounce dynamicChainData updates to prevent flickering
-                if (lastStableDataRef.current !== chainDataKey) {
-                    const now = Date.now();
-                    if (now - lastChainUpdate.current > 100) { // 100ms debounce for very responsive updates
-                        lastChainUpdate.current = now;
-                        lastStableDataRef.current = chainDataKey;
-                        
-                        // Additional deep comparison to prevent flickering
-                        const chainDataString = JSON.stringify(chainData);
-                        const lastDataString = lastChainDataRef.current ? JSON.stringify(lastChainDataRef.current) : null;
-                        
-                        if (chainDataString !== lastDataString) {
-                            lastChainDataRef.current = chainData;
-                            setDynamicChainData(chainData);
-                        }
+                // Update dynamicChainData for canvas updates
+                // Check if chain structure changed OR if we need to update for status changes
+                const now = Date.now();
+                const shouldUpdate = lastStableDataRef.current !== chainDataKey || 
+                                   (now - lastChainUpdate.current > 100);
+                
+                if (shouldUpdate) {
+                    lastChainUpdate.current = now;
+                    lastStableDataRef.current = chainDataKey;
+                    
+                    // Additional deep comparison to prevent flickering
+                    const chainDataString = JSON.stringify(chainData);
+                    const lastDataString = lastChainDataRef.current ? JSON.stringify(lastChainDataRef.current) : null;
+                    
+                    if (chainDataString !== lastDataString) {
+                        lastChainDataRef.current = chainData;
+                        setDynamicChainData(chainData);
                     }
                 }
                 
@@ -730,7 +737,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
         console.log(`📊 Monitor: Showing execution details for ${nodeId}`);
     }, [chainExecution, ruleExpressions]);
 
-    // Set up polling for active samples with optimized change detection
+    // Set up polling for active samples
     useEffect(() => {
         // Clear existing interval
         if (pollingIntervalRef.current) {
@@ -738,19 +745,16 @@ export const SampleMonitor = React.memo(function SampleMonitor({
             pollingIntervalRef.current = null;
         }
 
-        if (!selectedContext || !chainExecution) return;
-
-        // Only poll when a sample is selected and displayed in canvas (not for all samples)
-        const shouldPoll = currentAutoRefresh && !!selectedContext && !!chainExecution;
-
-        if (shouldPoll) {
+        // Only start polling if we have a selected context AND auto-refresh is enabled
+        if (selectedContext && currentAutoRefresh) {
             pollingIntervalRef.current = setInterval(async () => {
                 try {
-                    await fetchChainExecution(selectedContext);
+                    // Use the ref to avoid dependency on fetchChainExecution
+                    await fetchChainExecutionRef.current(selectedContext);
                 } catch (error) {
                     console.error('Polling error:', error);
                 }
-            }, 1000); // Poll every 1 second for real-time canvas updates (only for selected sample)
+            }, 5000); // Poll every 5 seconds to match Sample List refresh rate
         }
 
         return () => {
@@ -759,7 +763,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 pollingIntervalRef.current = null;
             }
         };
-    }, [selectedContext, currentAutoRefresh, fetchChainExecution]);
+    }, [selectedContext, currentAutoRefresh]); // Removed fetchChainExecution and chainExecution dependencies
 
     return (
         <div className="fixed inset-0 top-14 bg-background">
