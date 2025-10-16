@@ -7,6 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Progress } from '../components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Input } from '../components/ui/input';
 import { cn } from '../lib/utils';
 import {
     CaretDown,
@@ -19,7 +22,10 @@ import {
     Pulse,
     Info,
     Warning,
-    Stop
+    Stop,
+    Wrench,
+    PencilSimple,
+    Plus
 } from '@phosphor-icons/react';
 import { WorkflowContext, ChainContext, RulesEngineService } from '../services/RulesEngineService';
 import { toast } from 'sonner';
@@ -106,6 +112,12 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
     const [ruleStats, setRuleStats] = useState<any>(null);
     const [activeProcessing, setActiveProcessing] = useState<any>(null);
     const [metricsLoading, setMetricsLoading] = useState(false);
+
+    // Advanced Actions state
+    const [showAdvancedActions, setShowAdvancedActions] = useState(false);
+    const [selectedAction, setSelectedAction] = useState<'status' | 'complete' | 'rule' | 'abort' | null>(null);
+    const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+    const [actionFormData, setActionFormData] = useState<any>({});
 
     // Load metrics when context is selected or metrics tab is selected
     React.useEffect(() => {
@@ -201,6 +213,64 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
         }
     };
 
+    const handleExecuteAction = async () => {
+        setShowConfirmDialog(false);
+        
+        if (!chainExecution?.chainId) {
+            toast.error('No chain ID available');
+            return;
+        }
+
+        try {
+            let result;
+            
+            switch (selectedAction) {
+                case 'status':
+                    result = await rulesEngineService.updateChainStatus(chainExecution.chainId, {
+                        currentRuleName: actionFormData.currentRuleName,
+                        currentDepth: 0, // Default depth since input was removed
+                        status: actionFormData.status,
+                        isActive: actionFormData.isActive,
+                        isComplete: actionFormData.isComplete,
+                        errorMessage: actionFormData.errorMessage
+                    });
+                    break;
+                    
+                case 'complete':
+                    result = await rulesEngineService.markChainComplete(chainExecution.chainId);
+                    break;
+                    
+                case 'rule':
+                    const usedVars = actionFormData.usedVariablesJson ? JSON.parse(actionFormData.usedVariablesJson) : undefined;
+                    const outputVars = actionFormData.outputVariablesJson ? JSON.parse(actionFormData.outputVariablesJson) : undefined;
+                    
+                    result = await rulesEngineService.addRuleStatus(chainExecution.chainId, {
+                        ruleName: actionFormData.ruleName,
+                        isSuccess: actionFormData.isSuccess,
+                        errorMessage: actionFormData.errorMessage,
+                        usedVariables: usedVars,
+                        outputVariables: outputVars
+                    });
+                    break;
+                    
+                case 'abort':
+                    result = await rulesEngineService.abortChainExecution(chainExecution.chainId, actionFormData.reason);
+                    break;
+            }
+            
+            if (result?.success) {
+                toast.success(`Action "${selectedAction}" completed successfully`);
+            } else {
+                toast.error(`Action failed: ${result?.message || 'Unknown error'}`);
+            }
+        } catch (error: any) {
+            toast.error(`Error: ${error.message}`);
+        } finally {
+            setSelectedAction(null);
+            setActionFormData({});
+        }
+    };
+
     // Calculate execution progress using enriched payload data
     const executionProgress = chainExecution ? {
         total: chainExecution.progress?.totalRules || chainExecution.rules?.length || 0,
@@ -228,23 +298,21 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                     <div className="flex items-center justify-between mb-3">
                         <h2 className="text-lg font-semibold">Context Details</h2>
                         <div className="flex gap-2">
-                            {chainExecution?.chainId && (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            onClick={handleAbortChain}
-                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                        >
-                                            <Stop className="w-4 h-4" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        <p>Abort running chain execution</p>
-                                    </TooltipContent>
-                                </Tooltip>
-                            )}
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        onClick={() => setShowAdvancedActions(true)}
+                                        title="Advanced Actions"
+                                    >
+                                        <Wrench className="w-4 h-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Advanced developer actions</p>
+                                </TooltipContent>
+                            </Tooltip>
                             <Button
                                 size="icon"
                                 variant="ghost"
@@ -300,7 +368,62 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                             {executionProgress && (
                                 <div className="space-y-2">
                                     <div className="flex items-center justify-between text-xs">
-                                        <span className="text-muted-foreground">Progress</span>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <span className="text-muted-foreground cursor-help">Progress</span>
+                                            </TooltipTrigger>
+                                            <TooltipContent className="max-w-md">
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-lg">📊</span>
+                                                        <p className="font-semibold text-sm">Progress Calculation (Estimate)</p>
+                                                    </div>
+                                                    
+                                                    <div className="bg-blue-50 p-3 rounded-lg border-l-4 border-blue-400">
+                                                        <p className="text-sm font-mono text-blue-800">
+                                                            (RulesOnPathExecuted / MinimumPathLength) × 100
+                                                        </p>
+                                                    </div>
+                                                    
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="text-blue-600 font-semibold text-xs min-w-[140px]">RulesOnPathExecuted:</span>
+                                                            <span className="text-xs text-gray-700">Rules executed on the shortest path to completion</span>
+                                                        </div>
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="text-blue-600 font-semibold text-xs min-w-[140px]">MinimumPathLength:</span>
+                                                            <span className="text-xs text-gray-700">Shortest path from initiating rule to RULECHAINCOMPLETE</span>
+                                                        </div>
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="text-blue-600 font-semibold text-xs min-w-[140px]">Dynamic Path:</span>
+                                                            <span className="text-xs text-gray-700">Recalculates based on actual branch taken</span>
+                                                        </div>
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="text-blue-600 font-semibold text-xs min-w-[140px]">Special Case:</span>
+                                                            <span className="text-xs text-gray-700">Force 100% when RULECHAINCOMPLETE is reached</span>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="text-yellow-600 text-sm">⚠️</span>
+                                                            <div>
+                                                                <p className="text-xs font-semibold text-yellow-800">Important Note</p>
+                                                                <p className="text-xs text-yellow-700 mt-1">
+                                                                    This is an estimate that may go backward in % based on the path taken through branching chains.
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="bg-gray-50 p-2 rounded border-l-2 border-gray-300">
+                                                        <p className="text-xs text-gray-600">
+                                                            <span className="font-semibold">Example:</span> 2 rules executed on 4-rule shortest path = 50%
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </TooltipContent>
+                                        </Tooltip>
                                         <span className="font-medium">{executionProgress.percentage.toFixed(1)}%</span>
                                     </div>
                                     <Progress 
@@ -745,6 +868,338 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                     </TabsContent>
                 </ScrollArea>
             </Tabs>
+
+            {/* Advanced Actions Selection Dialog */}
+            <Dialog open={showAdvancedActions} onOpenChange={setShowAdvancedActions}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Advanced Actions</DialogTitle>
+                        <DialogDescription>
+                            Developer tools for interacting with the Rules Engine API
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Button
+                            variant="outline"
+                            className="w-full justify-start"
+                            onClick={() => {
+                                setSelectedAction('status');
+                                setShowAdvancedActions(false);
+                            }}
+                        >
+                            <PencilSimple className="w-4 h-4 mr-2" />
+                            Update Chain Status
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="w-full justify-start"
+                            onClick={() => {
+                                setSelectedAction('complete');
+                                setShowAdvancedActions(false);
+                            }}
+                        >
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Mark Chain Complete
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="w-full justify-start"
+                            onClick={() => {
+                                setSelectedAction('rule');
+                                setShowAdvancedActions(false);
+                            }}
+                        >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add Rule Status Entry
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="w-full justify-start text-red-600"
+                            onClick={() => {
+                                setSelectedAction('abort');
+                                setShowAdvancedActions(false);
+                            }}
+                        >
+                            <Stop className="w-4 h-4 mr-2" />
+                            Abort Chain Execution
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Update Status Form Dialog */}
+            <Dialog open={selectedAction === 'status'} onOpenChange={(open) => !open && setSelectedAction(null)}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Update Chain Status</DialogTitle>
+                        <DialogDescription>Modify the current status of the chain execution</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-sm font-medium flex items-center gap-2">
+                                Current Rule Name
+                                <Tooltip><TooltipTrigger><Info className="w-3 h-3" /></TooltipTrigger>
+                                <TooltipContent>The name of the rule currently executing</TooltipContent></Tooltip>
+                            </label>
+                            <Input
+                                value={actionFormData.currentRuleName || ''}
+                                onChange={(e) => setActionFormData({...actionFormData, currentRuleName: e.target.value})}
+                                placeholder="Enter rule name"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium flex items-center gap-2">
+                                Status
+                                <Tooltip><TooltipTrigger><Info className="w-3 h-3" /></TooltipTrigger>
+                                <TooltipContent>The execution status (Pending, Running, Completed, Failed)</TooltipContent></Tooltip>
+                            </label>
+                            <Select
+                                value={actionFormData.status || ''}
+                                onValueChange={(value) => setActionFormData({...actionFormData, status: value})}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="Pending">Pending</SelectItem>
+                                    <SelectItem value="Running">Running</SelectItem>
+                                    <SelectItem value="Completed">Completed</SelectItem>
+                                    <SelectItem value="Failed">Failed</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex gap-4">
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <label className="flex items-center gap-2 cursor-help">
+                                        <input
+                                            type="checkbox"
+                                            checked={actionFormData.isActive || false}
+                                            onChange={(e) => setActionFormData({...actionFormData, isActive: e.target.checked})}
+                                        />
+                                        Is Active
+                                    </label>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Indicates whether the chain execution is currently running and processing rules</p>
+                                </TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <label className="flex items-center gap-2 cursor-help">
+                                        <input
+                                            type="checkbox"
+                                            checked={actionFormData.isComplete || false}
+                                            onChange={(e) => setActionFormData({...actionFormData, isComplete: e.target.checked})}
+                                        />
+                                        Is Complete
+                                    </label>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Indicates whether the chain execution has finished successfully</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </div>
+                        {actionFormData.status === 'Failed' && (
+                            <div>
+                                <label className="text-sm font-medium flex items-center gap-2">
+                                    Error Message (required)
+                                    <Tooltip>
+                                        <TooltipTrigger><Info className="w-3 h-3" /></TooltipTrigger>
+                                        <TooltipContent>Error message is required when status is set to Failed</TooltipContent>
+                                    </Tooltip>
+                                </label>
+                                <Input
+                                    value={actionFormData.errorMessage || ''}
+                                    onChange={(e) => setActionFormData({...actionFormData, errorMessage: e.target.value})}
+                                    placeholder="Enter error message (required)"
+                                    className={!actionFormData.errorMessage ? 'border-red-500' : ''}
+                                />
+                                {!actionFormData.errorMessage && (
+                                    <p className="text-xs text-red-500 mt-1">Error message is required when status is Failed</p>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setSelectedAction(null)}>Cancel</Button>
+                        <Button 
+                            onClick={() => setShowConfirmDialog(true)}
+                            disabled={
+                                !actionFormData.currentRuleName?.trim() || 
+                                !actionFormData.status || 
+                                (actionFormData.status === 'Failed' && !actionFormData.errorMessage?.trim())
+                            }
+                        >
+                            Submit
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Mark Complete Form Dialog */}
+            <Dialog open={selectedAction === 'complete'} onOpenChange={(open) => !open && setSelectedAction(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Mark Chain Complete</DialogTitle>
+                        <DialogDescription>Mark this chain execution as complete</DialogDescription>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                        This will mark chain <code className="text-xs bg-muted px-1 py-0.5 rounded">{chainExecution?.chainId}</code> as complete.
+                    </p>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setSelectedAction(null)}>Cancel</Button>
+                        <Button onClick={() => setShowConfirmDialog(true)}>Submit</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Add Rule Status Form Dialog */}
+            <Dialog open={selectedAction === 'rule'} onOpenChange={(open) => !open && setSelectedAction(null)}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Add Rule Status Entry</DialogTitle>
+                        <DialogDescription>Add a new rule execution status to the chain history</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-sm font-medium flex items-center gap-2">
+                                Rule Name
+                                <Tooltip><TooltipTrigger><Info className="w-3 h-3" /></TooltipTrigger>
+                                <TooltipContent>The name of the rule that was executed</TooltipContent></Tooltip>
+                            </label>
+                            <Input
+                                value={actionFormData.ruleName || ''}
+                                onChange={(e) => setActionFormData({...actionFormData, ruleName: e.target.value})}
+                                placeholder="Enter rule name"
+                            />
+                        </div>
+                        <div>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <label className="flex items-center gap-2 cursor-help">
+                                        <input
+                                            type="checkbox"
+                                            checked={actionFormData.isSuccess !== false}
+                                            onChange={(e) => setActionFormData({...actionFormData, isSuccess: e.target.checked})}
+                                        />
+                                        Is Success
+                                    </label>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Indicates whether the rule execution completed successfully without errors</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium">Error Message (optional)</label>
+                            <Input
+                                value={actionFormData.errorMessage || ''}
+                                onChange={(e) => setActionFormData({...actionFormData, errorMessage: e.target.value})}
+                                placeholder="Enter error message if rule failed"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium flex items-center gap-2">
+                                Used Variables (optional)
+                                <Tooltip><TooltipTrigger><Info className="w-3 h-3" /></TooltipTrigger>
+                                <TooltipContent>Variables that were read/used during rule execution (JSON format)</TooltipContent></Tooltip>
+                            </label>
+                            <textarea
+                                className="w-full h-20 text-xs font-mono p-2 border rounded"
+                                value={actionFormData.usedVariablesJson || '{}'}
+                                onChange={(e) => setActionFormData({...actionFormData, usedVariablesJson: e.target.value})}
+                                placeholder='{"key": "value"}'
+                            />
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium flex items-center gap-2">
+                                Output Variables (optional)
+                                <Tooltip><TooltipTrigger><Info className="w-3 h-3" /></TooltipTrigger>
+                                <TooltipContent>Variables that were written/output by the rule execution (JSON format)</TooltipContent></Tooltip>
+                            </label>
+                            <textarea
+                                className="w-full h-20 text-xs font-mono p-2 border rounded"
+                                value={actionFormData.outputVariablesJson || '{}'}
+                                onChange={(e) => setActionFormData({...actionFormData, outputVariablesJson: e.target.value})}
+                                placeholder='{"key": "value"}'
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setSelectedAction(null)}>Cancel</Button>
+                        <Button 
+                            onClick={() => setShowConfirmDialog(true)}
+                            disabled={!actionFormData.ruleName?.trim()}
+                        >
+                            Submit
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Abort Chain Form Dialog */}
+            <Dialog open={selectedAction === 'abort'} onOpenChange={(open) => !open && setSelectedAction(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Abort Chain Execution</DialogTitle>
+                        <DialogDescription>Abort this chain execution with a required reason</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-sm font-medium flex items-center gap-2">
+                                Reason (required)
+                                <Tooltip><TooltipTrigger><Info className="w-3 h-3" /></TooltipTrigger>
+                                <TooltipContent>You must provide a reason for aborting the chain</TooltipContent></Tooltip>
+                            </label>
+                            <Input
+                                value={actionFormData.reason || ''}
+                                onChange={(e) => setActionFormData({...actionFormData, reason: e.target.value})}
+                                placeholder="Enter reason for aborting the chain"
+                                className={!actionFormData.reason ? 'border-red-500' : ''}
+                            />
+                            {!actionFormData.reason && (
+                                <p className="text-xs text-red-500 mt-1">Reason is required to abort the chain</p>
+                            )}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                            This will abort chain <code className="text-xs bg-muted px-1 py-0.5 rounded">{chainExecution?.chainId}</code>.
+                        </p>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setSelectedAction(null)}>Cancel</Button>
+                        <Button 
+                            onClick={() => setShowConfirmDialog(true)}
+                            disabled={!actionFormData.reason?.trim()}
+                        >
+                            Submit
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Confirmation Dialog */}
+            <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Warning className="w-5 h-5 text-yellow-500" />
+                            Confirm Action
+                        </DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to perform this action? This will modify the chain execution state in the Rules Engine.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="bg-muted p-3 rounded text-sm">
+                        <p><strong>Action:</strong> {selectedAction}</p>
+                        <p><strong>Chain ID:</strong> {chainExecution?.chainId}</p>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowConfirmDialog(false)}>Cancel</Button>
+                        <Button variant="destructive" onClick={handleExecuteAction}>Confirm & Execute</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

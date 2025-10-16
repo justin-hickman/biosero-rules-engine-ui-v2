@@ -1292,4 +1292,100 @@ export class RulesEngineService {
             return { success: false, message: 'Network error' };
         }
     }
+
+    // Update chain status
+    async updateChainStatus(chainId: string, payload: {
+        currentRuleName: string;
+        currentDepth: number;
+        status: string;
+        isActive: boolean;
+        isComplete: boolean;
+        errorMessage?: string;
+    }): Promise<{ success: boolean; message?: string }> {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/UiMonitor/contexts/${chainId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                return { success: false, message: errorText };
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error updating chain status:', error);
+            return { success: false, message: 'Network error' };
+        }
+    }
+
+    // Abort chain execution (NEW ENDPOINT)
+    async abortChainExecution(chainId: string, reason?: string): Promise<{ success: boolean; message?: string }> {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/UiMonitor/contexts/${chainId}/abort`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: reason || 'User requested abort' })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                return { success: false, message: errorText };
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error aborting chain:', error);
+            return { success: false, message: 'Network error' };
+        }
+    }
+
+    // Mark chain as complete
+    async markChainComplete(chainId: string): Promise<{ success: boolean; message?: string }> {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/UiMonitor/contexts/${chainId}/complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                return { success: false, message: errorText };
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error marking chain complete:', error);
+            return { success: false, message: 'Network error' };
+        }
+    }
+
+    // Add rule status entry
+    async addRuleStatus(chainId: string, payload: {
+        ruleName: string;
+        isSuccess: boolean;
+        errorMessage?: string;
+        usedVariables?: Record<string, any>;
+        outputVariables?: Record<string, any>;
+    }): Promise<{ success: boolean; message?: string }> {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/UiMonitor/contexts/${chainId}/rules`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                return { success: false, message: errorText };
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error adding rule status:', error);
+            return { success: false, message: 'Network error' };
+        }
+    }
 }
