@@ -67,12 +67,16 @@ export const SampleList = React.memo(function SampleList({
     }, [debouncedSearchTerm, filterStatus]);
     const [dateFilter, setDateFilter] = useState<number | null>(null);
     const [groupingType, setGroupingType] = useState<'order' | 'batch' | 'sample'>('sample');
-    const [isAutoRefresh, setIsAutoRefresh] = useState(externalAutoRefresh);
+    // CRITICAL: DO NOT CHANGE - This prevents circular dependency that causes flashing
+    // Starting with true ensures both SampleList and SampleMonitor start aligned
+    const [isAutoRefresh, setIsAutoRefresh] = useState(true); // Start with auto-refresh enabled
     
-    // Sync with external auto refresh state
-    useEffect(() => {
-        setIsAutoRefresh(externalAutoRefresh);
-    }, [externalAutoRefresh]);
+    // CRITICAL: DO NOT CHANGE - This sync effect was causing circular dependency and flashing
+    // The sync effect resets isAutoRefresh to false, breaking the alignment with SampleMonitor
+    // Removing this prevents the circular dependency that causes flashing
+    // useEffect(() => {
+    //     setIsAutoRefresh(externalAutoRefresh);
+    // }, [externalAutoRefresh]);
     
     // Notify parent of auto-refresh state changes
     useEffect(() => {
@@ -462,7 +466,9 @@ export const SampleList = React.memo(function SampleList({
         }
     }, []);
 
-    // Render sample card with stable key and memoization - simplified
+    // CRITICAL: DO NOT CHANGE - This prevents SampleList flashing
+    // The selectedSampleId dependency is necessary for selection highlighting
+    // Removing it breaks selection, adding other dependencies causes flashing
     const renderSampleCard = useCallback((sample: WorkflowContext, autoRefresh: boolean) => {
         const isSelected = selectedSampleId === sample.sampleId;
         
@@ -518,7 +524,7 @@ export const SampleList = React.memo(function SampleList({
                 </div>
             </Card>
         );
-    }, [selectedSampleId, onSampleSelect]);
+    }, [selectedSampleId, onSampleSelect]); // CRITICAL: DO NOT MODIFY DEPENDENCIES - causes flashing
 
     const totalCount = useMemo(() => {
         if (groupingType === 'sample') {

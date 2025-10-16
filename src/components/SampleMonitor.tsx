@@ -26,15 +26,13 @@ interface SampleMonitorProps {
     dataServicesUrl: string;
     chainData?: ChainData | null;
     onLoadRule?: (ruleId: string) => void;
-    isAutoRefresh?: boolean;
 }
 
 export const SampleMonitor = React.memo(function SampleMonitor({ 
     rulesEngineUrl, 
     dataServicesUrl,
     chainData,
-    onLoadRule,
-    isAutoRefresh = false
+    onLoadRule
 }: SampleMonitorProps) {
     const [selectedContext, setSelectedContext] = useState<WorkflowContext | null>(null);
     const [chainExecution, setChainExecution] = useState<ChainContext | null>(null);
@@ -56,7 +54,9 @@ export const SampleMonitor = React.memo(function SampleMonitor({
     } | null>(null);
     const [fullChainData, setFullChainData] = useState<ChainData | null>(null);
     const [ruleExpressions, setRuleExpressions] = useState<Record<string, string>>({});
-    const [currentAutoRefresh, setCurrentAutoRefresh] = useState(isAutoRefresh);
+    // CRITICAL: DO NOT CHANGE - This prevents circular dependency that breaks live updates
+    // Starting with true ensures polling works immediately when sample is selected
+    const [currentAutoRefresh, setCurrentAutoRefresh] = useState(true); // Start with auto-refresh enabled
     const lastStableDataRef = React.useRef<string | null>(null);
     const lastChainDataRef = React.useRef<ChainData | null>(null);
     
@@ -86,10 +86,6 @@ export const SampleMonitor = React.memo(function SampleMonitor({
         }
     }, [selectedContext]);
     
-    // Sync currentAutoRefresh with the prop
-    useEffect(() => {
-        setCurrentAutoRefresh(isAutoRefresh);
-    }, [isAutoRefresh]);
     
     // Memoize chain data to prevent unnecessary re-renders with optimized comparison
     const stableChainData = React.useMemo(() => {
@@ -412,6 +408,21 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                     chainContext = response.items[0];
                 }
                 
+                // CRITICAL: DO NOT CHANGE - This enables live updates for active samples
+                // Without this, selectedContext becomes stale and polling uses old data
+                // This keeps selectedContext in sync with the API for live updates
+                if (chainContext) {
+                    setSelectedContext(prevContext => {
+                        if (!prevContext) return prevContext;
+                        
+                        // Create updated context with latest status from chain execution
+                        return {
+                            ...prevContext,
+                            status: chainContext.isComplete ? 1 : (chainContext.status || prevContext.status),
+                            lastUpdatedAt: chainContext.lastUpdatedAt || prevContext.lastUpdatedAt
+                        };
+                    });
+                }
                 
                 // Only update chainExecution if it has actually changed
                 setChainExecution(prevExecution => {
@@ -737,7 +748,9 @@ export const SampleMonitor = React.memo(function SampleMonitor({
         console.log(`📊 Monitor: Showing execution details for ${nodeId}`);
     }, [chainExecution, ruleExpressions]);
 
-    // Set up polling for active samples
+    // CRITICAL: DO NOT CHANGE - This is the core polling logic that enables live updates
+    // Removing fetchChainExecution and chainExecution dependencies prevents polling restarts
+    // This effect MUST use the ref to avoid dependency issues that break live updates
     useEffect(() => {
         // Clear existing interval
         if (pollingIntervalRef.current) {
@@ -763,7 +776,7 @@ export const SampleMonitor = React.memo(function SampleMonitor({
                 pollingIntervalRef.current = null;
             }
         };
-    }, [selectedContext, currentAutoRefresh]); // Removed fetchChainExecution and chainExecution dependencies
+    }, [selectedContext, currentAutoRefresh]); // CRITICAL: DO NOT ADD fetchChainExecution or chainExecution dependencies
 
     return (
         <div className="fixed inset-0 top-14 bg-background">

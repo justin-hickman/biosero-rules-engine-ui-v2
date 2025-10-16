@@ -451,10 +451,11 @@ export function ContextViewer({ context, chainExecution, rulesEngineService }: C
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Clock className="w-3 h-3" />
                         <span>
-                            Running for {chainExecution ? 
+                            Ran for {chainExecution ? 
                                 rulesEngineService.formatDuration(chainExecution.startTimestamp, chainExecution.endTimestamp || new Date().toISOString()) :
                                 rulesEngineService.formatDuration(context.createdAt, context.lastUpdatedAt)
                             }
+                            {context?.status === 0 && <span className="text-yellow-500 ml-2">• Pending completion</span>}
                         </span>
                     </div>
                 </div>
